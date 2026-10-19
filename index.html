@@ -406,6 +406,10 @@
       font-weight: 600;
     }
 
+    .logline.redo {
+      color: #1971c2;
+    }
+
     .logline.undo {
       color: #e03131;
     }
@@ -434,6 +438,56 @@
       50% {
         opacity: .25;
       }
+    }
+
+    /* 图标按钮 */
+    .ibtn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 38px;
+      height: 38px;
+      padding: 0;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      color: #444;
+      cursor: pointer;
+    }
+
+    .ibtn.sm {
+      width: 30px;
+      height: 30px;
+      border-radius: 6px;
+    }
+
+    .ibtn.danger {
+      color: #e03131;
+    }
+
+    .ibtn:disabled {
+      opacity: .3;
+      cursor: default;
+    }
+
+    .ibtn:not(:disabled):active {
+      background: #f1f3f5;
+    }
+
+    .ic {
+      width: 18px;
+      height: 18px;
+    }
+
+    .head-tools {
+      display: flex;
+      gap: 6px;
+    }
+
+    .card h3.bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
     }
 
     /* 占位桌 */
@@ -522,7 +576,7 @@
     function load() {
       try {
         const d = JSON.parse(localStorage.getItem(KEY));
-        if (d) { d.log = d.log || []; d.logArchive = d.logArchive || []; return d; }
+        if (d) { d.log = d.log || []; d.logArchive = d.logArchive || []; d.undoStack = d.undoStack || []; d.redoStack = d.redoStack || []; return d; }
       } catch (e) { }
       return {
         waiters: [],        // [{id,name}]
@@ -532,10 +586,22 @@
         records: {},        // waiterId -> {count, items:[{id,table,size,shared}]}  size 为客人实际人数
         history: [],        // [{id, waiterId, time}] 分配先后顺序（用于撤销），条目详情在 records 中
         log: [],            // 当天日志 [{t, type, text, st}]
-        logArchive: []      // 往日日志 [{date, entries}]
+        logArchive: [],     // 往日日志 [{date, entries}]
+        undoStack: [],      // 撤销栈 [{s, label}]：s 为操作前 records+history 的快照
+        redoStack: []       // 重做栈
       };
     }
     const save = () => localStorage.setItem(KEY, JSON.stringify(S));
+
+    /* ---------- 图标（内联 SVG，无需外部资源） ---------- */
+    const ICON_PATHS = {
+      undo: '<path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-15-6.7L3 13"/>',
+      redo: '<path d="M21 7v6h-6"/><path d="M3 17a9 9 0 0 1 15-6.7L21 13"/>'
+    };
+    const ic = n => `<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON_PATHS[n]}</svg>`;
+    // 图标按钮：title / aria-label 作为文字提示
+    const ibtn = (name, title, onclick, o = {}) =>
+      `<button class="ibtn ${o.cls || ''}" title="${esc(title)}" aria-label="${esc(title)}" ${o.disabled ? 'disabled' : ''} onclick="${onclick}">${ic(name)}</button>`;
     const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const wname = id => (S.waiters.find(w => w.id === id) || { name: '(已删除)' }).name;
@@ -620,9 +686,38 @@
     }
     const descItem = it => it.shared ? `${it.table} 共享桌(${it.size}人，不计人数)` : `${it.table} ${it.size}人`;
 
+    /* ---------- 撤销 / 重做 ----------
+       每次改动（分配、修改、删除、释放占位）前先存一份快照；撤销/重做在快照间切换，
+       并在日志里留一条记录（日志本身只追加，不回退）。 */
+    const UNDO_MAX = 50;
+    const snap = () => JSON.stringify({ records: S.records, history: S.history });
+    function pushUndo(label) {
+      S.undoStack.push({ s: snap(), label });
+      if (S.undoStack.length > UNDO_MAX) S.undoStack.shift();
+      S.redoStack = [];
+    }
+    function restore(str) { const d = JSON.parse(str); S.records = d.records; S.history = d.history; recount(); }
+    function undo() {
+      const e = S.undoStack.pop();
+      if (!e) return;
+      S.redoStack.push({ s: snap(), label: e.label });
+      restore(e.s);
+      addLog('undo', `撤销：${e.label}；下一位：${wname(nextWaiter())}`, true);
+      save();
+    }
+    function redo() {
+      const e = S.redoStack.pop();
+      if (!e) return;
+      S.undoStack.push({ s: snap(), label: e.label });
+      restore(e.s);
+      addLog('redo', `重做：${e.label}；下一位：${wname(nextWaiter())}`, true);
+      save();
+    }
+
     function assign(table, size) {
       const id = nextWaiter();
       if (!id) return;
+      pushUndo(`分配 ${table} ${size}人 → ${wname(id)}`);
       const r = S.records[id], before = r.count;
       const item = { id: uid(), table, size, shared: isShared(size), t: Date.now() };
       r.items.push(item);
@@ -632,20 +727,17 @@
       save();
     }
 
-    // 删除某条分配（撤销上一条 / 弹窗里的删除都走这里）
+    // 删除某条分配（修改弹窗里的删除；可撤销）
     function removeEntry(id, label) {
       const f = findItem(id);
       if (!f) return;
+      pushUndo(`删除 ${descItem(f.item)}（${wname(f.waiterId)}）`);
       const before = f.r.count;
       f.r.items.splice(f.r.items.indexOf(f.item), 1);
       S.history = S.history.filter(h => h.id !== id);
       recount();
-      addLog('undo', `${label}：${descItem(f.item)} ← ${wname(f.waiterId)}（${before} → ${f.r.count} 人）；下一位：${wname(nextWaiter())}`, true);
+      addLog('edit', `${label}：${descItem(f.item)} ← ${wname(f.waiterId)}（${before} → ${f.r.count} 人）；下一位：${wname(nextWaiter())}`, true);
       save();
-    }
-    function undo() {
-      const h = S.history[S.history.length - 1];
-      if (h) removeEntry(h.id, '撤销');
     }
 
     // 客人换桌 / 临时加减人：服务员不变，重新计算人数（可能跨过共享桌阈值）
@@ -653,6 +745,7 @@
       const f = findItem(id);
       if (!f) return;
       const before = f.r.count, old = descItem(f.item);
+      pushUndo(`修改 ${wname(f.waiterId)} 的 ${old}`);
       f.item.table = table; f.item.size = size; f.item.shared = isShared(size);
       recount();
       addLog('edit', `修改：${wname(f.waiterId)} 的 ${old} → ${descItem(f.item)}（${before} → ${f.r.count} 人）；下一位：${wname(nextWaiter())}`, true);
@@ -674,6 +767,7 @@
       const code = ui.release, now = Date.now();
       const f = occupantOf(code);
       if (!f) return closeRelease();
+      pushUndo(`释放占位 ${code}（${wname(f.waiterId)}）`);
       for (const wid in S.records) {
         S.records[wid].items.forEach(it => { if (it.table === code && !it.released) it.released = now; });
       }
@@ -873,7 +967,10 @@
   </div>
 
   <div class="card">
-    <h3>客人到店</h3>
+    <h3 class="bar">客人到店 <span class="head-tools">
+      ${ibtn('undo', S.undoStack.length ? '撤销：' + S.undoStack[S.undoStack.length - 1].label : '撤销', 'doUndo()', { disabled: !S.undoStack.length })}
+      ${ibtn('redo', S.redoStack.length ? '重做：' + S.redoStack[S.redoStack.length - 1].label : '重做', 'doRedo()', { disabled: !S.redoStack.length })}
+    </span></h3>
     <div class="label hint">选择餐桌（红色 = 占位中，点击可释放）</div>
     <div class="tables">${S.tables.map(t => {
         const o = occupantOf(t.code);
@@ -907,7 +1004,7 @@
   </div>
 
   <div class="card log">
-    <h3>最近记录 <button class="mini" style="float:right;color:#444" ${S.history.length ? '' : 'disabled'} onclick="doUndo()">撤销上一条</button></h3>
+    <h3>最近记录</h3>
     ${S.history.slice(-8).reverse().map(h => {
             const f = findItem(h.id); if (!f) return '';
             return `<div class="recent"><span>${fmtTime(h.time)}
@@ -948,7 +1045,7 @@
       save(); render();
     }
     function startDay() {
-      S.records = {}; S.history = []; S.log = [];
+      S.records = {}; S.history = []; S.log = []; S.undoStack = []; S.redoStack = [];
       S.onDuty.forEach(id => S.records[id] = { count: 0, items: [] });
       S.started = true;
       addLog('start', `开始营业，上岗顺序：${S.onDuty.map((id, i) => `${i + 1}.${wname(id)}`).join(' ')}；下一位：${wname(nextWaiter())}`);
@@ -963,7 +1060,7 @@ ${SHIFT_NAME.morning}（${shiftRange('morning')}）：${summary(inShift('morning
 ${SHIFT_NAME.evening}（${shiftRange('evening')}）：${summary(inShift('evening'))}`);
       S.logArchive.push({ date: fmtDate(S.log[0].t), entries: S.log });
       S.logArchive = S.logArchive.slice(-60); // 最多保留 60 天
-      S.started = false; S.records = {}; S.history = []; S.onDuty = []; S.log = [];
+      S.started = false; S.records = {}; S.history = []; S.onDuty = []; S.log = []; S.undoStack = []; S.redoStack = [];
       save(); render();
     }
     function pickTable(c) {   // 选桌后整页重绘，需保留「其他」输入框的内容
@@ -991,6 +1088,7 @@ ${SHIFT_NAME.evening}（${shiftRange('evening')}）：${summary(inShift('evening
       ui.table = null; ui.size = null; ui.custom = ''; render();
     }
     function doUndo() { undo(); render(); }
+    function doRedo() { redo(); render(); }
     function resetAll() { if (confirm('确定清空所有数据？')) { localStorage.removeItem(KEY); S = load(); ui = { tab: 'config' }; render(); } }
 
     document.getElementById('nav').addEventListener('click', e => {
@@ -1013,7 +1111,13 @@ ${SHIFT_NAME.evening}（${shiftRange('evening')}）：${summary(inShift('evening
       }
       recount();
     })();
-    document.addEventListener('keydown', e => { if (e.key !== 'Escape') return; if (ui.release) closeRelease(); else if (ui.edit) closeEdit(); });
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape') { if (ui.release) closeRelease(); else if (ui.edit) closeEdit(); return; }
+      // Ctrl/Cmd+Z 撤销，Ctrl/Cmd+Shift+Z 重做（在输入框里时不拦截）
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z' && S.started && !/INPUT|TEXTAREA/.test((document.activeElement || {}).tagName || '')) {
+        e.preventDefault(); e.shiftKey ? doRedo() : doUndo();
+      }
+    });
     // 首次使用（浏览器里还没有服务员和餐桌）时自动读取 config.js
     if (!S.waiters.length && !S.tables.length) { applyConfig(); save(); }
     render();
