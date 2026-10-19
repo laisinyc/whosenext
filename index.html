@@ -490,6 +490,23 @@
       align-items: center;
     }
 
+    /* 按平面图排列的餐桌 */
+    .tgrid .cell {
+      display: flex;
+    }
+
+    .tgrid .cell button {
+      flex: 1;
+      min-width: 0;
+      padding: 10px 4px;
+    }
+
+    .tgrid small {
+      display: block;
+      font-size: 11px;
+      word-break: break-all;
+    }
+
     /* 占位桌 */
     .tables button.occ {
       background: #fff0f0;
@@ -798,6 +815,30 @@
   </div></div>`;
     }
 
+    /* ---------- 餐桌按平面图排列 ----------
+       config.js 的 tableLayout 用文字描述俯瞰图：每行一个字符串，格子用空格分隔，"." 表示空位，
+       同一个桌号占相邻的多个格子（必须是长方形）即为跨行/跨列。没有写进 layout 的桌子排在下面。
+       items: [{code,...}]；render(item) 返回按钮 HTML。 */
+    function layoutGrid(items, render) {
+      const rows = Array.isArray(CFG.tableLayout) && CFG.tableLayout.length
+        ? CFG.tableLayout.map(r => String(r).trim().split(/\s+/)) : null;
+      if (!rows) return `<div class="tables">${items.map(render).join('')}</div>`;
+      const byCode = new Map(items.map((it, i) => [it.code, { it, name: 't' + i }]));
+      const cols = Math.max(...rows.map(r => r.length));
+      const placed = new Set();
+      const areas = rows.map(r => "'" + Array.from({ length: cols }, (_, c) => {
+        const hit = byCode.get(r[c]);
+        if (!hit) return '.';
+        placed.add(r[c]);
+        return hit.name;
+      }).join(' ') + "'").join(' ');   // 单引号：这段会放进 style="..." 里，不能用双引号
+      const cells = [...placed].map(code => { const h = byCode.get(code);
+        return `<div class="cell" style="grid-area:${h.name}">${render(h.it)}</div>`; }).join('');
+      const rest = items.filter(it => !placed.has(it.code));
+      return `<div class="tables tgrid" style="display:grid;grid-template-columns:repeat(${cols},minmax(0,1fr));grid-template-areas:${areas};grid-auto-rows:minmax(46px,auto)">${cells}</div>`
+        + (rest.length ? `<div class="tables">${rest.map(render).join('')}</div>` : '');
+    }
+
     /* ---------- 修改弹窗 ---------- */
     function editCodes() {
       const codes = S.tables.map(t => t.code);
@@ -855,11 +896,11 @@
     <h3>修改分配</h3>
     <div class="hint">服务员：<b>${esc(wname(f.waiterId))}</b>（换桌或加减人不会更换服务员）</div>
     <div class="lbl">餐桌</div>
-    <div class="tables">${editCodes().map((c, i) => {
-        const t = S.tables.find(t => t.code === c);
+    ${layoutGrid(editCodes().map((c, i) => ({ code: c, i })), it => {
+        const c = it.code, t = S.tables.find(t => t.code === c);
         const o = editConflict(c);
-        return `<button class="${e.table === c ? 'sel' : ''} ${o ? 'occ' : ''}" ${o ? 'disabled' : ''} onclick="editPick(${i})">${esc(c)}${o ? ' <small>占位</small>' : t ? ` <small>/${t.cap}人</small>` : ''}</button>`;
-      }).join('')}</div>
+        return `<button class="${e.table === c ? 'sel' : ''} ${o ? 'occ' : ''}" ${o ? 'disabled' : ''} onclick="editPick(${it.i})">${esc(c)}${o ? ' <small>占位</small>' : t ? ` <small>/${t.cap}人</small>` : ''}</button>`;
+      })}
     <div class="lbl">客人人数</div>
     <div class="stepper">
       <button onclick="editStep(-1)">−</button>
@@ -972,13 +1013,12 @@
       ${ibtn('redo', S.redoStack.length ? '重做：' + S.redoStack[S.redoStack.length - 1].label : '重做', 'doRedo()', { disabled: !S.redoStack.length })}
     </span></h3>
     <div class="label hint">选择餐桌（红色 = 占位中，点击可释放）</div>
-    <div class="tables">${S.tables.map(t => {
+    ${S.tables.length ? layoutGrid(S.tables, t => {
         const o = occupantOf(t.code);
         return o
           ? `<button class="occ" onclick="openRelease('${esc(t.code)}')">${esc(t.code)} <small>占位·${esc(wname(o.waiterId))}·${o.item.size}人</small></button>`
           : `<button class="${ui.table === t.code ? 'sel' : ''}" onclick="pickTable('${esc(t.code)}')">${esc(t.code)} <small>/${t.cap}人</small></button>`;
-      }).join('')
-        || '<span class="empty">请先到「配置」添加餐桌</span>'}</div>
+      }) : '<div class="empty">请先到「配置」添加餐桌</div>'}
     <div class="label hint">客人人数</div>
     <div class="quick">${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(n =>
           `<button data-n="${n}" class="${ui.size === n && !ui.custom ? 'sel' : ''}" onclick="pickSize(${n})">${n}</button>`).join('')}
