@@ -4,6 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>Whose Next - 服务员排序</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#e8590c">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
 <style>
   :root { --pri:#e8590c; --bg:#f6f4f1; --card:#fff; --line:#e6e1da; --ok:#2b8a3e; --mute:#868e96; }
   * { box-sizing:border-box; }
@@ -49,10 +55,23 @@
   .quick button.sel { background:var(--pri); color:#fff; border-color:var(--pri); }
   .empty { color:var(--mute); text-align:center; padding:16px 0; }
   .log { font-size:14px; color:#444; }
+  button.chip { border:0; font-family:inherit; cursor:pointer; }
+  button.chip.editable::after { content:" ✎"; opacity:.6; }
+  .recent { display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-top:1px solid var(--line); }
+  .mask { position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:20; display:flex; align-items:center; justify-content:center; padding:16px; }
+  .modal { background:#fff; border-radius:14px; padding:18px; width:100%; max-width:420px; max-height:90vh; overflow:auto; }
+  .modal h3 { margin:0 0 4px; font-size:17px; }
+  .modal .lbl { margin:14px 0 4px; font-size:13px; color:var(--mute); }
+  .stepper { display:flex; gap:8px; align-items:center; }
+  .stepper button { width:44px; height:44px; border:1px solid var(--line); background:#fff; border-radius:8px; font-size:22px; }
+  .stepper input { width:80px; text-align:center; font-size:20px; padding:8px; }
+  .modal .actions { display:flex; gap:8px; margin-top:18px; }
+  .modal .actions .btn { flex:1; }
   .logline { padding:7px 0; border-top:1px solid var(--line); font-size:14px; line-height:1.5; word-break:break-all; }
   .logline .t { color:var(--mute); font-family:ui-monospace,Menlo,monospace; font-size:12px; margin-right:6px; }
   .logline.start, .logline.end { color:var(--ok); font-weight:600; }
   .logline.undo { color:#e03131; }
+  .logline.edit { color:#1971c2; }
   .logline .st { display:block; color:var(--mute); font-size:12px; }
   .live { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--ok); margin-right:6px; animation:blink 1.4s infinite; }
   @keyframes blink { 50% { opacity:.25; } }
@@ -67,6 +86,7 @@
   <button data-tab="config">配置</button>
 </nav>
 <main id="app"></main>
+<div id="modal"></div>
 
 <script src="config.js"></script>
 <script>
@@ -93,7 +113,7 @@ function importConfig() {
   if (!confirm('用 config.js 覆盖当前的服务员和餐桌列表？')) return;
   applyConfig(); save(); render();
 }
-let ui = { tab: null, table: null, size: null };
+let ui = { tab: null, table: null, size: null, custom: '', edit: null };
 
 function load() {
   try {
@@ -105,8 +125,8 @@ function load() {
     tables: [],         // [{code,cap}]
     onDuty: [],         // 勾选顺序: [waiterId]
     started: false,
-    records: {},        // waiterId -> {count, items:[{table,size,shared}]}
-    history: [],        // [{waiterId, table, size, shared, time}] 用于撤销
+    records: {},        // waiterId -> {count, items:[{id,table,size,shared}]}  size 为客人实际人数
+    history: [],        // [{id, waiterId, time}] 分配先后顺序（用于撤销），条目详情在 records 中
     log: [],            // 当天日志 [{t, type, text, st}]
     logArchive: []      // 往日日志 [{date, entries}]
   };
@@ -132,15 +152,18 @@ const pad = n => String(n).padStart(2, '0');
 const fmtTime = t => { const d = new Date(t); return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; };
 const fmtDate = t => { const d = new Date(t); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
 // 当前排班快照：按初始顺序列出每位服务员已服务人数
-const standings = () => S.onDuty.map(id => `${wname(id)} ${S.records[id].count}`).join(' | ');
+const sharedOf = id => S.records[id].items.filter(it => it.shared);
+// 共享桌只留记录，不计入人数；这里单独标出共享桌数量
+const standings = () => S.onDuty.map(id => `${wname(id)} ${S.records[id].count}` + (sharedOf(id).length ? `(另有共享桌${sharedOf(id).length}桌)` : '')).join(' | ');
 function addLog(type, text, withStandings) {
   S.log.push({ t: Date.now(), type, text, st: withStandings ? standings() : '' });
 }
 function summary() {
   return S.onDuty.map((id, i) => {
     const r = S.records[id];
-    const tb = r.items.map(it => it.shared ? `${it.table}(共享)` : `${it.table}(${it.size}人)`).join('、') || '无';
-    return `${i + 1}.${wname(id)} 共${r.count}人，桌号：${tb}`;
+    const tb = r.items.filter(it => !it.shared).map(it => `${it.table}(${it.size}人)`).join('、') || '无';
+    const sh = sharedOf(id).map(it => `${it.table}(${it.size}人)`).join('、');
+    return `${i + 1}.${wname(id)} 共${r.count}人，桌号：${tb}` + (sh ? `；共享桌(不计人数)：${sh}` : '');
   }).join('；');
 }
 function logToText(date, entries) {
@@ -155,29 +178,129 @@ const exportToday = () => download(`排班日志-${fmtDate(Date.now())}.txt`, lo
 const exportArchive = i => { const a = S.logArchive[i]; download(`排班日志-${a.date}.txt`, logToText(a.date, a.entries)); };
 function delArchive(i) { if (confirm('删除这天的日志？')) { S.logArchive.splice(i, 1); save(); render(); } }
 
+const isShared = size => size > SHARE_THRESHOLD;
+// 人数 = 非共享桌的人数之和（共享桌不计）
+function recount() {
+  for (const id in S.records) {
+    const r = S.records[id];
+    r.count = r.items.reduce((n, it) => n + (it.shared ? 0 : it.size), 0);
+  }
+}
+function findItem(id) {
+  for (const wid in S.records) {
+    const item = S.records[wid].items.find(it => it.id === id);
+    if (item) return { waiterId: wid, item, r: S.records[wid] };
+  }
+  return null;
+}
+const descItem = it => it.shared ? `${it.table} 共享桌(${it.size}人，不计人数)` : `${it.table} ${it.size}人`;
+
 function assign(table, size) {
   const id = nextWaiter();
   if (!id) return;
-  const shared = size > SHARE_THRESHOLD;
-  const r = S.records[id];
-  if (!shared) r.count += size;           // 共享桌不计人数
-  const before = r.count - (shared ? 0 : size);
-  r.items.push({ table, size: shared ? null : size, shared });
-  S.history.push({ waiterId: id, table, size, shared, time: Date.now() });
-  const nx = nextWaiter();
-  addLog('assign', shared
-    ? `${table} 共享桌(${size}人，不计人数) → ${wname(id)}（累计 ${r.count} 人）；下一位：${wname(nx)}`
-    : `${table} ${size}人 → ${wname(id)}（${before} → ${r.count} 人）；下一位：${wname(nx)}`, true);
+  const r = S.records[id], before = r.count;
+  const item = { id: uid(), table, size, shared: isShared(size) };
+  r.items.push(item);
+  S.history.push({ id: item.id, waiterId: id, time: Date.now() });
+  recount();
+  addLog('assign', `${descItem(item)} → ${wname(id)}（${before} → ${r.count} 人）；下一位：${wname(nextWaiter())}`, true);
   save();
 }
 
-function undo() {
-  const h = S.history.pop();
-  if (!h) return;
-  const r = S.records[h.waiterId];
-  if (r) { r.items.pop(); if (!h.shared) r.count -= h.size; }
-  addLog('undo', `撤销：${h.table} ${h.shared ? '共享桌' : h.size + '人'} → ${wname(h.waiterId)}；下一位：${wname(nextWaiter())}`, true);
+// 删除某条分配（撤销上一条 / 弹窗里的删除都走这里）
+function removeEntry(id, label) {
+  const f = findItem(id);
+  if (!f) return;
+  const before = f.r.count;
+  f.r.items.splice(f.r.items.indexOf(f.item), 1);
+  S.history = S.history.filter(h => h.id !== id);
+  recount();
+  addLog('undo', `${label}：${descItem(f.item)} ← ${wname(f.waiterId)}（${before} → ${f.r.count} 人）；下一位：${wname(nextWaiter())}`, true);
   save();
+}
+function undo() {
+  const h = S.history[S.history.length - 1];
+  if (h) removeEntry(h.id, '撤销');
+}
+
+// 客人换桌 / 临时加减人：服务员不变，重新计算人数（可能跨过共享桌阈值）
+function editEntry(id, table, size) {
+  const f = findItem(id);
+  if (!f) return;
+  const before = f.r.count, old = descItem(f.item);
+  f.item.table = table; f.item.size = size; f.item.shared = isShared(size);
+  recount();
+  addLog('edit', `修改：${wname(f.waiterId)} 的 ${old} → ${descItem(f.item)}（${before} → ${f.r.count} 人）；下一位：${wname(nextWaiter())}`, true);
+  save();
+}
+
+/* ---------- 修改弹窗 ---------- */
+function editCodes() {
+  const codes = S.tables.map(t => t.code);
+  if (ui.edit && !codes.includes(ui.edit.origTable)) codes.unshift(ui.edit.origTable);
+  return codes;
+}
+function openEdit(id) {
+  const f = findItem(id);
+  if (!f) return;
+  ui.edit = { id, table: f.item.table, origTable: f.item.table, size: f.item.size };
+  render();
+}
+function closeEdit() { ui.edit = null; render(); }
+function editPick(i) { ui.edit.table = editCodes()[i]; render(); }
+function editStep(d) { ui.edit.size = Math.max(1, (ui.edit.size || 0) + d); render(); }
+function editTyping(v) {            // 打字时不整页重绘，避免丢焦点
+  const n = parseInt(v, 10);
+  ui.edit.size = n >= 1 ? n : null;
+  document.getElementById('editHint').innerHTML = editHint();
+  document.getElementById('editSave').disabled = !ui.edit.size;
+}
+function editHint() {
+  const e = ui.edit, t = S.tables.find(t => t.code === e.table);
+  if (!e.size) return '请输入人数';
+  if (isShared(e.size)) return `<span style="color:#1971c2">人数 &gt; ${SHARE_THRESHOLD}：按共享桌处理，只记桌号，不计人数</span>`;
+  if (t && e.size > t.cap) return `<span style="color:#e03131">${esc(t.code)} 最多坐 ${t.cap} 人</span>`;
+  return `计入服务人数：${e.size} 人`;
+}
+function saveEdit() {
+  const e = ui.edit, t = S.tables.find(t => t.code === e.table);
+  if (!e.size) return;
+  if (t && !isShared(e.size) && e.size > t.cap &&
+      !confirm(`${t.code} 最多坐 ${t.cap} 人，当前 ${e.size} 人，仍要保存吗？`)) return;
+  editEntry(e.id, e.table, e.size);
+  closeEdit();
+}
+function deleteEdit() {
+  if (!confirm('删除这条分配？该桌人数会从服务员记录中扣除')) return;
+  removeEntry(ui.edit.id, '删除');
+  closeEdit();
+}
+function viewModal() {
+  const e = ui.edit;
+  if (!e) return '';
+  const f = findItem(e.id);
+  if (!f) { ui.edit = null; return ''; }
+  return `<div class="mask" onclick="if(event.target===this)closeEdit()"><div class="modal">
+    <h3>修改分配</h3>
+    <div class="hint">服务员：<b>${esc(wname(f.waiterId))}</b>（换桌或加减人不会更换服务员）</div>
+    <div class="lbl">餐桌</div>
+    <div class="tables">${editCodes().map((c, i) => {
+      const t = S.tables.find(t => t.code === c);
+      return `<button class="${e.table === c ? 'sel' : ''}" onclick="editPick(${i})">${esc(c)}${t ? ` <small>/${t.cap}人</small>` : ''}</button>`;
+    }).join('')}</div>
+    <div class="lbl">客人人数</div>
+    <div class="stepper">
+      <button onclick="editStep(-1)">−</button>
+      <input type="number" min="1" value="${e.size || ''}" oninput="editTyping(this.value)">
+      <button onclick="editStep(1)">+</button>
+    </div>
+    <div class="hint" id="editHint" style="margin-top:8px">${editHint()}</div>
+    <div class="actions">
+      <button class="btn red" onclick="deleteEdit()" style="flex:0 0 auto">删除</button>
+      <button class="btn gray" onclick="closeEdit()">取消</button>
+      <button class="btn" id="editSave" ${e.size ? '' : 'disabled'} onclick="saveEdit()">保存</button>
+    </div>
+  </div></div>`;
 }
 
 /* ---------- 渲染 ---------- */
@@ -186,6 +309,7 @@ function render() {
   document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('active', b.dataset.tab === ui.tab));
   const app = document.getElementById('app');
   app.innerHTML = ({ assign: viewAssign, duty: viewDuty, log: viewLog, config: viewConfig })[ui.tab]();
+  document.getElementById('modal').innerHTML = viewModal();
 }
 
 function viewConfig() {
@@ -270,12 +394,12 @@ function viewAssign() {
       `<button class="${ui.table === t.code ? 'sel' : ''}" onclick="pickTable('${esc(t.code)}')">${esc(t.code)} <small>/${t.cap}人</small></button>`).join('')
       || '<span class="empty">请先到「配置」添加餐桌</span>'}</div>
     <div class="label hint">客人人数</div>
-    <div class="quick">${[1,2,3,4,5,6,7,8,9,10].map(n =>
-      `<button class="${ui.size === n ? 'sel' : ''}" onclick="pickSize(${n})">${n}</button>`).join('')}
-      <input class="num" type="number" min="1" placeholder="其他" value="${ui.size > 10 ? ui.size : ''}" oninput="pickSize(+this.value, true)">
+    <div class="quick">${[1,2,3,4,5,6,7,8,9,10,11,12].map(n =>
+      `<button data-n="${n}" class="${ui.size === n && !ui.custom ? 'sel' : ''}" onclick="pickSize(${n})">${n}</button>`).join('')}
+      <input class="num" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" placeholder="其他" value="${esc(ui.custom || '')}" oninput="typeSize(this)">
     </div>
-    ${shared ? `<div class="hint" style="color:#1971c2">人数 &gt; ${SHARE_THRESHOLD}：共享桌，只记录桌号，不计人数</div>` : ''}
-    <div style="margin-top:12px"><button class="btn" style="width:100%" ${ready ? '' : 'disabled'} onclick="doAssign()">
+    <div class="hint" id="sizeHint" style="color:#1971c2">${shared ? `人数 &gt; ${SHARE_THRESHOLD}：共享桌，只记录桌号，不计人数` : ''}</div>
+    <div style="margin-top:12px"><button class="btn" id="assignBtn" style="width:100%" ${ready ? '' : 'disabled'} onclick="doAssign()">
       分配给 ${esc(wname(nid))}</button></div>
   </div>
 
@@ -286,17 +410,20 @@ function viewAssign() {
       return `<div class="w ${id === nid ? 'is-next' : ''}">
         <span class="badge">${i + 1}</span>
         <div class="info"><b>${esc(wname(id))}</b> ${id === nid ? '<span class="chip">下一位</span>' : ''}
-          <div>${r.items.map(it => `<span class="chip ${it.shared ? 'share' : ''}">${esc(it.table)}${it.shared ? ' 共享' : '·' + it.size + '人'}</span>`).join('') || '<span class="hint">暂无</span>'}</div>
+          <div>${r.items.map(it => `<button class="chip editable ${it.shared ? 'share' : ''}" onclick="openEdit('${it.id}')">${esc(it.table)}${it.shared ? ' 共享·' + it.size + '人(不计)' : '·' + it.size + '人'}</button>`).join('') || '<span class="hint">暂无</span>'}</div>
         </div>
-        <div class="cnt">${r.count}<small> 人</small></div>
+        <div class="cnt">${r.count}<small> 人</small>${sharedOf(id).length ? `<div class="hint" style="font-size:12px;font-weight:400;color:#1971c2">共享 ${sharedOf(id).length} 桌</div>` : ''}</div>
       </div>`;
     }).join('')}
   </div>
 
   <div class="card log">
     <h3>最近记录 <button class="mini" style="float:right;color:#444" ${S.history.length ? '' : 'disabled'} onclick="doUndo()">撤销上一条</button></h3>
-    ${S.history.slice(-8).reverse().map(h => `<div>${new Date(h.time).toLocaleTimeString('zh-CN',{hour12:false})}
-      ${esc(h.table)} → <b>${esc(wname(h.waiterId))}</b> ${h.shared ? '(共享桌)' : h.size + '人'}</div>`).join('')
+    ${S.history.slice(-8).reverse().map(h => {
+      const f = findItem(h.id); if (!f) return '';
+      return `<div class="recent"><span>${fmtTime(h.time)}
+      ${esc(f.item.table)} → <b>${esc(wname(h.waiterId))}</b> ${f.item.shared ? `共享桌 ${f.item.size}人(不计)` : f.item.size + '人'}</span>
+      <button class="mini" style="color:#444" onclick="openEdit('${h.id}')">修改</button></div>`; }).join('')
       || '<div class="empty">暂无</div>'}
   </div>`;
 }
@@ -345,24 +472,28 @@ function endDay() {
   S.started = false; S.records = {}; S.history = []; S.onDuty = []; S.log = [];
   save(); render();
 }
-function pickTable(c) { ui.table = c; render(); }
-function pickSize(n, typing) {
-  ui.size = n >= 1 ? n : null;
-  if (typing) { // 输入框打字时不整页重绘，避免丢焦点
-    const shared = ui.size > SHARE_THRESHOLD;
-    document.querySelectorAll('.quick button').forEach(b => b.classList.remove('sel'));
-    return refreshAssignBtn();
-  }
-  render();
+function pickTable(c) {   // 选桌后整页重绘，需保留「其他」输入框的内容
+  ui.table = c; render();
 }
-function refreshAssignBtn() { const y = window.scrollY; const a = document.activeElement; const v = a.value; render(); 
-  const inp = document.querySelector('.quick input'); if (inp) { inp.focus(); inp.setSelectionRange(v.length, v.length); } window.scrollTo(0, y); }
+function pickSize(n) { ui.size = n; ui.custom = ''; render(); }
+// 「其他」输入框：只改局部元素，不整页重绘，所以不会丢焦点或清空输入
+function typeSize(inp) {
+  const digits = inp.value.replace(/\D/g, '');
+  if (digits !== inp.value) inp.value = digits;
+  const n = parseInt(digits, 10);
+  ui.custom = digits;
+  ui.size = n >= 1 ? n : null;
+  document.querySelectorAll('.quick button').forEach(b => b.classList.remove('sel'));
+  const shared = ui.size > SHARE_THRESHOLD;
+  document.getElementById('sizeHint').innerHTML = shared ? `人数 &gt; ${SHARE_THRESHOLD}：共享桌，只记录桌号，不计人数` : '';
+  document.getElementById('assignBtn').disabled = !(ui.table && ui.size >= 1);
+}
 function doAssign() {
   const t = S.tables.find(t => t.code === ui.table);
   if (t && ui.size > t.cap && ui.size <= SHARE_THRESHOLD &&
       !confirm(`${t.code} 最多坐 ${t.cap} 人，当前 ${ui.size} 人，仍要分配吗？`)) return;
   assign(ui.table, ui.size);
-  ui.table = null; ui.size = null; render();
+  ui.table = null; ui.size = null; ui.custom = ''; render();
 }
 function doUndo() { undo(); render(); }
 function resetAll() { if (confirm('确定清空所有数据？')) { localStorage.removeItem(KEY); S = load(); ui = { tab: 'config' }; render(); } }
@@ -370,9 +501,27 @@ function resetAll() { if (confirm('确定清空所有数据？')) { localStorage
 document.getElementById('nav').addEventListener('click', e => {
   if (e.target.dataset.tab) { ui.tab = e.target.dataset.tab; render(); }
 });
+// 兼容旧数据：给没有 id 的条目补上 id，共享桌补上实际人数
+(function migrate() {
+  for (const wid in S.records) {
+    const hs = S.history.filter(h => h.waiterId === wid && !h.id);
+    S.records[wid].items.forEach((it, i) => {
+      if (!it.id) { it.id = uid(); if (hs[i]) { hs[i].id = it.id; if (it.size == null) it.size = hs[i].size; } }
+      if (it.size == null) it.size = 0;
+    });
+  }
+  S.history = S.history.filter(h => h.id);
+  recount();
+})();
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && ui.edit) closeEdit(); });
 // 首次使用（浏览器里还没有服务员和餐桌）时自动读取 config.js
 if (!S.waiters.length && !S.tables.length) { applyConfig(); save(); }
 render();
+
+// PWA：注册 Service Worker（需要 https 或 localhost；直接双击打开本地文件时会自动跳过）
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  navigator.serviceWorker.register('sw.js').catch(err => console.warn('SW 注册失败', err));
+}
 </script>
 </body>
 </html>

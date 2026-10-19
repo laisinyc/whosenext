@@ -12,23 +12,32 @@ window.WHOSENEXT_CONFIG = {
 
   // 服务员名字（名字不能重复）
   waiters: [
-    "小王",
-    "小李",
-    "小张",
-    "小赵",
-    "小陈",
+    "Dora",
+    "Jing",
+    "Ava",
+    "Wenjie",
+    "Ge",
   ],
 
   // 餐桌：code = 桌号/代号，cap = 最多可坐人数
   tables: [
-    { code: "A1", cap: 2 },
-    { code: "A2", cap: 2 },
+    { code: "A1", cap: 4 },
+    { code: "A2", cap: 4 },
     { code: "A3", cap: 4 },
     { code: "A4", cap: 4 },
-    { code: "B1", cap: 6 },
-    { code: "B2", cap: 6 },
-    { code: "C1", cap: 10 },   // 大桌
-    { code: "C2", cap: 12 },   // 大桌
+    { code: "A5", cap: 4 },
+    { code: "A6", cap: 4 },
+    { code: "B1", cap: 4 },
+    { code: "B23", cap: 8 },
+    { code: "B45", cap: 8 },
+    { code: "B6", cap: 4 },
+    { code: "C1", cap: 4 },
+    { code: "C23", cap: 8 },   // 大桌
+    { code: "C45", cap: 8 },   // 大桌
+    { code: "C6", cap: 4 },   // 大桌
+    { code: "E1", cap: 4 },   // 大桌
+    { code: "E2", cap: 4 },   // 大桌
+    { code: "S123", cap: 12 },   // 大桌
   ],
 
   // 共享桌阈值：客人人数 大于 该值 时为共享桌（只记桌号，不计人数）
