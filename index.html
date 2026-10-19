@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <title>Whose Next - 服务员排序</title>
+  <title>Who is Next?</title>
   <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#e8590c">
   <meta name="mobile-web-app-capable" content="yes">
@@ -482,7 +482,7 @@
 </head>
 
 <body>
-  <header>🍽 Whose Next · 服务员排序</header>
+  <header>🍽 Who is Next?</header>
   <nav id="nav">
     <button data-tab="assign">分配</button>
     <button data-tab="duty">今日上岗</button>
@@ -876,11 +876,11 @@
     <h3>客人到店</h3>
     <div class="label hint">选择餐桌（红色 = 占位中，点击可释放）</div>
     <div class="tables">${S.tables.map(t => {
-          const o = occupantOf(t.code);
-          return o
-            ? `<button class="occ" onclick="openRelease('${esc(t.code)}')">${esc(t.code)} <small>占位·${esc(wname(o.waiterId))}·${o.item.size}人</small></button>`
-            : `<button class="${ui.table === t.code ? 'sel' : ''}" onclick="pickTable('${esc(t.code)}')">${esc(t.code)} <small>/${t.cap}人</small></button>`;
-        }).join('')
+        const o = occupantOf(t.code);
+        return o
+          ? `<button class="occ" onclick="openRelease('${esc(t.code)}')">${esc(t.code)} <small>占位·${esc(wname(o.waiterId))}·${o.item.size}人</small></button>`
+          : `<button class="${ui.table === t.code ? 'sel' : ''}" onclick="pickTable('${esc(t.code)}')">${esc(t.code)} <small>/${t.cap}人</small></button>`;
+      }).join('')
         || '<span class="empty">请先到「配置」添加餐桌</span>'}</div>
     <div class="label hint">客人人数</div>
     <div class="quick">${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(n =>
