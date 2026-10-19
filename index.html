@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Whose Next - 服务员排序</title>
+<style>
+  :root { --pri:#e8590c; --bg:#f6f4f1; --card:#fff; --line:#e6e1da; --ok:#2b8a3e; --mute:#868e96; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; background:var(--bg); color:#222; }
+  header { background:var(--pri); color:#fff; padding:14px 16px; font-size:18px; font-weight:600; }
+  nav { display:flex; background:#fff; border-bottom:1px solid var(--line); position:sticky; top:0; z-index:5; }
+  nav button { flex:1; padding:12px 0; border:0; background:none; font-size:15px; color:var(--mute); border-bottom:3px solid transparent; }
+  nav button.active { color:var(--pri); border-color:var(--pri); font-weight:600; }
+  main { max-width:720px; margin:0 auto; padding:12px; }
+  .card { background:var(--card); border-radius:12px; padding:14px; margin-bottom:12px; box-shadow:0 1px 3px rgba(0,0,0,.06); }
+  .card h3 { margin:0 0 10px; font-size:15px; }
+  .row { display:flex; gap:8px; align-items:center; }
+  input, select { padding:10px; border:1px solid var(--line); border-radius:8px; font-size:15px; min-width:0; }
+  input[type=text] { flex:1; }
+  input.num { width:90px; }
+  button.btn { padding:10px 16px; border:0; border-radius:8px; background:var(--pri); color:#fff; font-size:15px; }
+  button.btn.gray { background:#868e96; }
+  button.btn.red { background:#e03131; }
+  button.btn:disabled { opacity:.4; }
+  button.mini { border:1px solid var(--line); background:#fff; border-radius:6px; padding:4px 10px; color:#e03131; }
+  ul { list-style:none; margin:10px 0 0; padding:0; }
+  li { display:flex; justify-content:space-between; align-items:center; padding:9px 0; border-top:1px solid var(--line); }
+  .chip { display:inline-block; padding:2px 8px; margin:2px 4px 2px 0; border-radius:10px; background:#fff4e6; color:var(--pri); font-size:13px; }
+  .chip.share { background:#e7f5ff; color:#1971c2; }
+  .duty { display:flex; align-items:center; gap:10px; padding:12px 4px; border-top:1px solid var(--line); font-size:16px; }
+  .duty input { width:22px; height:22px; }
+  .badge { min-width:26px; height:26px; line-height:26px; text-align:center; border-radius:50%; background:var(--pri); color:#fff; font-size:13px; }
+  .next { text-align:center; padding:18px 10px; background:#fff4e6; border:2px solid var(--pri); }
+  .next .label { color:var(--mute); font-size:13px; }
+  .next .name { font-size:34px; font-weight:700; color:var(--pri); margin:4px 0; }
+  .hint { color:var(--mute); font-size:13px; margin-top:6px; }
+  .board .w { display:flex; gap:10px; padding:10px 0; border-top:1px solid var(--line); align-items:flex-start; }
+  .board .w.is-next { background:#fff9f0; }
+  .board .info { flex:1; }
+  .board .cnt { font-size:22px; font-weight:700; min-width:44px; text-align:right; }
+  .board .cnt small { font-size:12px; color:var(--mute); font-weight:400; }
+  .tables { display:flex; flex-wrap:wrap; gap:8px; margin:8px 0; }
+  .tables button { padding:10px 14px; border:1px solid var(--line); background:#fff; border-radius:8px; font-size:15px; }
+  .tables button.sel { background:var(--pri); color:#fff; border-color:var(--pri); }
+  .tables button small { opacity:.7; }
+  .quick { display:flex; flex-wrap:wrap; gap:6px; margin:8px 0; }
+  .quick button { width:40px; height:40px; border:1px solid var(--line); background:#fff; border-radius:8px; font-size:16px; }
+  .quick button.sel { background:var(--pri); color:#fff; border-color:var(--pri); }
+  .empty { color:var(--mute); text-align:center; padding:16px 0; }
+  .log { font-size:14px; color:#444; }
+  .logline { padding:7px 0; border-top:1px solid var(--line); font-size:14px; line-height:1.5; word-break:break-all; }
+  .logline .t { color:var(--mute); font-family:ui-monospace,Menlo,monospace; font-size:12px; margin-right:6px; }
+  .logline.start, .logline.end { color:var(--ok); font-weight:600; }
+  .logline.undo { color:#e03131; }
+  .logline .st { display:block; color:var(--mute); font-size:12px; }
+  .live { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--ok); margin-right:6px; animation:blink 1.4s infinite; }
+  @keyframes blink { 50% { opacity:.25; } }
+</style>
+</head>
+<body>
+<header>🍽 Whose Next · 服务员排序</header>
+<nav id="nav">
+  <button data-tab="assign">分配</button>
+  <button data-tab="duty">今日上岗</button>
+  <button data-tab="log">日志</button>
+  <button data-tab="config">配置</button>
+</nav>
+<main id="app"></main>
+
+<script src="config.js"></script>
+<script>
+const CFG = window.WHOSENEXT_CONFIG || {};
+const SHARE_THRESHOLD = Number.isFinite(CFG.shareThreshold) ? CFG.shareThreshold : 5; // 人数 > 阈值 为共享桌
+const KEY = 'whosenext.v1';
+
+let S = load();
+
+// 用 config.js 的内容覆盖服务员和餐桌（同名服务员保留原 id）
+function applyConfig() {
+  const old = S.waiters;
+  S.waiters = [...new Set((CFG.waiters || []).map(n => String(n).trim()).filter(Boolean))]
+    .map(name => ({ id: (old.find(w => w.name === name) || {}).id || uid(), name }));
+  const seen = new Set();
+  S.tables = (CFG.tables || [])
+    .map(t => ({ code: String(t.code).trim(), cap: parseInt(t.cap, 10) }))
+    .filter(t => t.code && t.cap >= 1 && !seen.has(t.code) && seen.add(t.code));
+  S.onDuty = S.onDuty.filter(id => S.waiters.some(w => w.id === id));
+}
+function importConfig() {
+  if (!window.WHOSENEXT_CONFIG) return alert('没有找到 config.js，请确认它和 index.html 在同一目录');
+  if (S.started) return alert('营业中不能导入，请先在「今日上岗」结束今天');
+  if (!confirm('用 config.js 覆盖当前的服务员和餐桌列表？')) return;
+  applyConfig(); save(); render();
+}
+let ui = { tab: null, table: null, size: null };
+
+function load() {
+  try {
+    const d = JSON.parse(localStorage.getItem(KEY));
+    if (d) { d.log = d.log || []; d.logArchive = d.logArchive || []; return d; }
+  } catch (e) {}
+  return {
+    waiters: [],        // [{id,name}]
+    tables: [],         // [{code,cap}]
+    onDuty: [],         // 勾选顺序: [waiterId]
+    started: false,
+    records: {},        // waiterId -> {count, items:[{table,size,shared}]}
+    history: [],        // [{waiterId, table, size, shared, time}] 用于撤销
+    log: [],            // 当天日志 [{t, type, text, st}]
+    logArchive: []      // 往日日志 [{date, entries}]
+  };
+}
+const save = () => localStorage.setItem(KEY, JSON.stringify(S));
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const wname = id => (S.waiters.find(w => w.id === id) || {name: '(已删除)'}).name;
+
+/* ---------- 核心排序 ---------- */
+// 服务人数最少优先；相同则按初始化(勾选)顺序靠前者优先
+function nextWaiter() {
+  let best = null;
+  for (const id of S.onDuty) {            // onDuty 本身就是初始化顺序
+    const c = S.records[id].count;
+    if (best === null || c < S.records[best].count) best = id; // 严格小于 => 平局保留靠前者
+  }
+  return best;
+}
+
+/* ---------- 日志 ---------- */
+const pad = n => String(n).padStart(2, '0');
+const fmtTime = t => { const d = new Date(t); return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; };
+const fmtDate = t => { const d = new Date(t); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+// 当前排班快照：按初始顺序列出每位服务员已服务人数
+const standings = () => S.onDuty.map(id => `${wname(id)} ${S.records[id].count}`).join(' | ');
+function addLog(type, text, withStandings) {
+  S.log.push({ t: Date.now(), type, text, st: withStandings ? standings() : '' });
+}
+function summary() {
+  return S.onDuty.map((id, i) => {
+    const r = S.records[id];
+    const tb = r.items.map(it => it.shared ? `${it.table}(共享)` : `${it.table}(${it.size}人)`).join('、') || '无';
+    return `${i + 1}.${wname(id)} 共${r.count}人，桌号：${tb}`;
+  }).join('；');
+}
+function logToText(date, entries) {
+  return `Whose Next 排班日志 ${date}\n` + entries.map(e => `[${fmtTime(e.t)}] ${e.text}` + (e.st ? `\n           当前人数：${e.st}` : '')).join('\n') + '\n';
+}
+function download(name, text) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob(['\ufeff' + text], { type: 'text/plain;charset=utf-8' }));
+  a.download = name; document.body.appendChild(a); a.click(); a.remove();
+}
+const exportToday = () => download(`排班日志-${fmtDate(Date.now())}.txt`, logToText(fmtDate(Date.now()), S.log));
+const exportArchive = i => { const a = S.logArchive[i]; download(`排班日志-${a.date}.txt`, logToText(a.date, a.entries)); };
+function delArchive(i) { if (confirm('删除这天的日志？')) { S.logArchive.splice(i, 1); save(); render(); } }
+
+function assign(table, size) {
+  const id = nextWaiter();
+  if (!id) return;
+  const shared = size > SHARE_THRESHOLD;
+  const r = S.records[id];
+  if (!shared) r.count += size;           // 共享桌不计人数
+  const before = r.count - (shared ? 0 : size);
+  r.items.push({ table, size: shared ? null : size, shared });
+  S.history.push({ waiterId: id, table, size, shared, time: Date.now() });
+  const nx = nextWaiter();
+  addLog('assign', shared
+    ? `${table} 共享桌(${size}人，不计人数) → ${wname(id)}（累计 ${r.count} 人）；下一位：${wname(nx)}`
+    : `${table} ${size}人 → ${wname(id)}（${before} → ${r.count} 人）；下一位：${wname(nx)}`, true);
+  save();
+}
+
+function undo() {
+  const h = S.history.pop();
+  if (!h) return;
+  const r = S.records[h.waiterId];
+  if (r) { r.items.pop(); if (!h.shared) r.count -= h.size; }
+  addLog('undo', `撤销：${h.table} ${h.shared ? '共享桌' : h.size + '人'} → ${wname(h.waiterId)}；下一位：${wname(nextWaiter())}`, true);
+  save();
+}
+
+/* ---------- 渲染 ---------- */
+function render() {
+  if (!ui.tab) ui.tab = S.started ? 'assign' : (S.waiters.length ? 'duty' : 'config');
+  document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('active', b.dataset.tab === ui.tab));
+  const app = document.getElementById('app');
+  app.innerHTML = ({ assign: viewAssign, duty: viewDuty, log: viewLog, config: viewConfig })[ui.tab]();
+}
+
+function viewConfig() {
+  return `
+  <div class="card">
+    <h3>配置文件</h3>
+    <div class="hint" style="margin:0 0 10px">修改 config.js 后，点下面按钮导入（会覆盖下方的服务员和餐桌）</div>
+    <button class="btn gray" onclick="importConfig()">从 config.js 导入</button>
+  </div>
+  <div class="card">
+    <h3>服务员</h3>
+    <div class="row"><input type="text" id="wName" placeholder="输入服务员名字" onkeydown="if(event.key==='Enter')addWaiter()">
+      <button class="btn" onclick="addWaiter()">添加</button></div>
+    <ul>${S.waiters.map(w => `<li><span>${esc(w.name)}</span><button class="mini" onclick="delWaiter('${w.id}')">删除</button></li>`).join('')
+      || '<div class="empty">暂无服务员</div>'}</ul>
+  </div>
+  <div class="card">
+    <h3>餐桌（代号 / 最多可坐人数）</h3>
+    <div class="row"><input type="text" id="tCode" placeholder="桌号，如 A1">
+      <input class="num" type="number" id="tCap" min="1" placeholder="人数" onkeydown="if(event.key==='Enter')addTable()">
+      <button class="btn" onclick="addTable()">添加</button></div>
+    <ul>${S.tables.map(t => `<li><span>${esc(t.code)} <span class="chip ${t.cap > SHARE_THRESHOLD ? 'share' : ''}">最多 ${t.cap} 人</span></span>
+      <button class="mini" onclick="delTable('${esc(t.code)}')">删除</button></li>`).join('')
+      || '<div class="empty">暂无餐桌</div>'}</ul>
+  </div>
+  <div class="card"><button class="btn red" onclick="resetAll()">清空所有数据</button></div>`;
+}
+
+function viewDuty() {
+  if (!S.waiters.length) return `<div class="card empty">请先到「配置」添加服务员</div>`;
+  const locked = S.started;
+  return `
+  <div class="card">
+    <h3>勾选今天在职的服务员 <span class="hint">（勾选顺序 = 初始排序）</span></h3>
+    ${S.waiters.map(w => {
+      const idx = S.onDuty.indexOf(w.id);
+      return `<label class="duty">
+        <input type="checkbox" ${idx >= 0 ? 'checked' : ''} ${locked ? 'disabled' : ''} onchange="toggleDuty('${w.id}')">
+        <span style="flex:1">${esc(w.name)}</span>
+        ${idx >= 0 ? `<span class="badge">${idx + 1}</span>` : ''}
+      </label>`;
+    }).join('')}
+    <div style="margin-top:12px" class="row">
+      ${locked
+        ? `<button class="btn red" onclick="endDay()">结束今天 / 重新开始</button>`
+        : `<button class="btn" ${S.onDuty.length ? '' : 'disabled'} onclick="startDay()">开始营业（${S.onDuty.length} 人）</button>`}
+    </div>
+  </div>`;
+}
+
+function viewLog() {
+  const line = e => `<div class="logline ${e.type}"><span class="t">${fmtTime(e.t)}</span>${esc(e.text)}${e.st ? `<span class="st">当前人数：${esc(e.st)}</span>` : ''}</div>`;
+  return `
+  <div class="card">
+    <h3>${S.started ? '<span class="live"></span>' : ''}今日日志（${fmtDate(Date.now())}）
+      <button class="mini" style="float:right;color:#444" ${S.log.length ? '' : 'disabled'} onclick="exportToday()">导出 .txt</button></h3>
+    ${S.log.slice().reverse().map(line).join('') || '<div class="empty">今天还没有记录</div>'}
+  </div>
+  ${S.logArchive.length ? `<div class="card"><h3>往日日志</h3>
+    ${S.logArchive.slice().reverse().map((a, k) => { const i = S.logArchive.length - 1 - k; return `<div class="logline row" style="justify-content:space-between">
+      <span>${esc(a.date)} <span class="hint">${a.entries.length} 条</span></span>
+      <span><button class="mini" style="color:#444" onclick="exportArchive(${i})">导出</button>
+      <button class="mini" onclick="delArchive(${i})">删除</button></span></div>`; }).join('')}</div>` : ''}`;
+}
+
+function viewAssign() {
+  if (!S.started) return `<div class="card empty">请先在「今日上岗」勾选服务员并开始营业</div>`;
+  const nid = nextWaiter();
+  const shared = ui.size > SHARE_THRESHOLD;
+  const ready = ui.table && ui.size >= 1;
+  return `
+  <div class="card next">
+    <div class="label">下一位服务员</div>
+    <div class="name">${esc(wname(nid))}</div>
+    <div class="label">当前已服务 ${S.records[nid].count} 人</div>
+  </div>
+
+  <div class="card">
+    <h3>客人到店</h3>
+    <div class="label hint">选择餐桌</div>
+    <div class="tables">${S.tables.map(t =>
+      `<button class="${ui.table === t.code ? 'sel' : ''}" onclick="pickTable('${esc(t.code)}')">${esc(t.code)} <small>/${t.cap}人</small></button>`).join('')
+      || '<span class="empty">请先到「配置」添加餐桌</span>'}</div>
+    <div class="label hint">客人人数</div>
+    <div class="quick">${[1,2,3,4,5,6,7,8,9,10].map(n =>
+      `<button class="${ui.size === n ? 'sel' : ''}" onclick="pickSize(${n})">${n}</button>`).join('')}
+      <input class="num" type="number" min="1" placeholder="其他" value="${ui.size > 10 ? ui.size : ''}" oninput="pickSize(+this.value, true)">
+    </div>
+    ${shared ? `<div class="hint" style="color:#1971c2">人数 &gt; ${SHARE_THRESHOLD}：共享桌，只记录桌号，不计人数</div>` : ''}
+    <div style="margin-top:12px"><button class="btn" style="width:100%" ${ready ? '' : 'disabled'} onclick="doAssign()">
+      分配给 ${esc(wname(nid))}</button></div>
+  </div>
+
+  <div class="card board">
+    <h3>今日服务情况</h3>
+    ${S.onDuty.map((id, i) => {
+      const r = S.records[id];
+      return `<div class="w ${id === nid ? 'is-next' : ''}">
+        <span class="badge">${i + 1}</span>
+        <div class="info"><b>${esc(wname(id))}</b> ${id === nid ? '<span class="chip">下一位</span>' : ''}
+          <div>${r.items.map(it => `<span class="chip ${it.shared ? 'share' : ''}">${esc(it.table)}${it.shared ? ' 共享' : '·' + it.size + '人'}</span>`).join('') || '<span class="hint">暂无</span>'}</div>
+        </div>
+        <div class="cnt">${r.count}<small> 人</small></div>
+      </div>`;
+    }).join('')}
+  </div>
+
+  <div class="card log">
+    <h3>最近记录 <button class="mini" style="float:right;color:#444" ${S.history.length ? '' : 'disabled'} onclick="doUndo()">撤销上一条</button></h3>
+    ${S.history.slice(-8).reverse().map(h => `<div>${new Date(h.time).toLocaleTimeString('zh-CN',{hour12:false})}
+      ${esc(h.table)} → <b>${esc(wname(h.waiterId))}</b> ${h.shared ? '(共享桌)' : h.size + '人'}</div>`).join('')
+      || '<div class="empty">暂无</div>'}
+  </div>`;
+}
+
+/* ---------- 操作 ---------- */
+function addWaiter() {
+  const el = document.getElementById('wName'); const name = el.value.trim();
+  if (!name) return;
+  if (S.waiters.some(w => w.name === name)) return alert('名字已存在');
+  S.waiters.push({ id: uid(), name }); save(); render();
+  document.getElementById('wName').focus();
+}
+function delWaiter(id) {
+  if (S.started && S.onDuty.includes(id)) return alert('该服务员今日在岗，请先结束今天再删除');
+  S.waiters = S.waiters.filter(w => w.id !== id);
+  S.onDuty = S.onDuty.filter(x => x !== id);
+  save(); render();
+}
+function addTable() {
+  const code = document.getElementById('tCode').value.trim();
+  const cap = parseInt(document.getElementById('tCap').value, 10);
+  if (!code || !(cap >= 1)) return alert('请输入桌号和最多可坐人数');
+  if (S.tables.some(t => t.code === code)) return alert('桌号已存在');
+  S.tables.push({ code, cap }); save(); render();
+  document.getElementById('tCode').focus();
+}
+function delTable(code) { S.tables = S.tables.filter(t => t.code !== code); save(); render(); }
+
+function toggleDuty(id) {
+  const i = S.onDuty.indexOf(id);
+  if (i >= 0) S.onDuty.splice(i, 1); else S.onDuty.push(id);
+  save(); render();
+}
+function startDay() {
+  S.records = {}; S.history = []; S.log = [];
+  S.onDuty.forEach(id => S.records[id] = { count: 0, items: [] });
+  S.started = true;
+  addLog('start', `开始营业，上岗顺序：${S.onDuty.map((id, i) => `${i + 1}.${wname(id)}`).join(' ')}；下一位：${wname(nextWaiter())}`);
+  save(); ui.tab = 'assign'; render();
+}
+function endDay() {
+  if (!confirm('结束今天？当天记录将清空')) return;
+  addLog('end', `结束营业。汇总：${summary()}`);
+  S.logArchive.push({ date: fmtDate(S.log[0].t), entries: S.log });
+  S.logArchive = S.logArchive.slice(-60); // 最多保留 60 天
+  S.started = false; S.records = {}; S.history = []; S.onDuty = []; S.log = [];
+  save(); render();
+}
+function pickTable(c) { ui.table = c; render(); }
+function pickSize(n, typing) {
+  ui.size = n >= 1 ? n : null;
+  if (typing) { // 输入框打字时不整页重绘，避免丢焦点
+    const shared = ui.size > SHARE_THRESHOLD;
+    document.querySelectorAll('.quick button').forEach(b => b.classList.remove('sel'));
+    return refreshAssignBtn();
+  }
+  render();
+}
+function refreshAssignBtn() { const y = window.scrollY; const a = document.activeElement; const v = a.value; render(); 
+  const inp = document.querySelector('.quick input'); if (inp) { inp.focus(); inp.setSelectionRange(v.length, v.length); } window.scrollTo(0, y); }
+function doAssign() {
+  const t = S.tables.find(t => t.code === ui.table);
+  if (t && ui.size > t.cap && ui.size <= SHARE_THRESHOLD &&
+      !confirm(`${t.code} 最多坐 ${t.cap} 人，当前 ${ui.size} 人，仍要分配吗？`)) return;
+  assign(ui.table, ui.size);
+  ui.table = null; ui.size = null; render();
+}
+function doUndo() { undo(); render(); }
+function resetAll() { if (confirm('确定清空所有数据？')) { localStorage.removeItem(KEY); S = load(); ui = { tab: 'config' }; render(); } }
+
+document.getElementById('nav').addEventListener('click', e => {
+  if (e.target.dataset.tab) { ui.tab = e.target.dataset.tab; render(); }
+});
+// 首次使用（浏览器里还没有服务员和餐桌）时自动读取 config.js
+if (!S.waiters.length && !S.tables.length) { applyConfig(); save(); }
+render();
+</script>
+</body>
+</html>
