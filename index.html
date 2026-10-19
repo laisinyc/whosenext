@@ -435,6 +435,49 @@
         opacity: .25;
       }
     }
+
+    /* 占位桌 */
+    .tables button.occ {
+      background: #fff0f0;
+      border-color: #ffa8a8;
+      color: #c92a2a;
+    }
+
+    .tables button.occ small {
+      opacity: .9;
+    }
+
+    .tables button:disabled {
+      opacity: .45;
+    }
+
+    button.chip.released {
+      opacity: .5;
+      text-decoration: line-through;
+    }
+
+    .logline.release {
+      color: #2b8a3e;
+    }
+
+    .logline {
+      white-space: pre-line;
+    }
+
+    .shift {
+      margin: 12px 0 2px;
+      padding: 4px 8px;
+      border-radius: 6px;
+      background: #f1f3f5;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .shift small {
+      color: var(--mute);
+      font-weight: 400;
+      margin-left: 6px;
+    }
   </style>
 </head>
 
@@ -474,7 +517,7 @@
       if (!confirm('用 config.js 覆盖当前的服务员和餐桌列表？')) return;
       applyConfig(); save(); render();
     }
-    let ui = { tab: null, table: null, size: null, custom: '', edit: null };
+    let ui = { tab: null, table: null, size: null, custom: '', edit: null, release: null };
 
     function load() {
       try {
@@ -512,6 +555,20 @@
     const pad = n => String(n).padStart(2, '0');
     const fmtTime = t => { const d = new Date(t); return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; };
     const fmtDate = t => { const d = new Date(t); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+    /* ---------- 班次：上午班 / 晚班（晚班从 eveningStart 开始，默认 16:30） ---------- */
+    const EVENING_START = (() => {
+      const m = /^(\d{1,2}):(\d{2})$/.exec(String(CFG.eveningStart || '16:30').trim());
+      return m ? (+m[1]) * 60 + (+m[2]) : 16 * 60 + 30;
+    })();
+    const fmtHM = min => `${pad(Math.floor(min / 60))}:${pad(min % 60)}`;
+    const SHIFT_NAME = { morning: '上午班', evening: '晚班' };
+    const shiftRange = k => k === 'morning' ? `~${fmtHM(EVENING_START)}` : `${fmtHM(EVENING_START)}~`;
+    const shiftOf = t => { const d = new Date(t); return d.getHours() * 60 + d.getMinutes() >= EVENING_START ? 'evening' : 'morning'; };
+    const splitShifts = entries => ({
+      morning: entries.filter(e => shiftOf(e.t) === 'morning'),
+      evening: entries.filter(e => shiftOf(e.t) === 'evening')
+    });
+
     // 当前排班快照：按初始顺序列出每位服务员已服务人数
     const sharedOf = id => S.records[id].items.filter(it => it.shared);
     // 共享桌只留记录，不计入人数；这里单独标出共享桌数量
@@ -519,16 +576,23 @@
     function addLog(type, text, withStandings) {
       S.log.push({ t: Date.now(), type, text, st: withStandings ? standings() : '' });
     }
-    function summary() {
+    // 汇总；pred 可按条目筛选（例如只看某个班次）
+    function summary(pred = () => true) {
       return S.onDuty.map((id, i) => {
-        const r = S.records[id];
-        const tb = r.items.filter(it => !it.shared).map(it => `${it.table}(${it.size}人)`).join('、') || '无';
-        const sh = sharedOf(id).map(it => `${it.table}(${it.size}人)`).join('、');
-        return `${i + 1}.${wname(id)} 共${r.count}人，${r.items.length}桌，桌号：${tb}` + (sh ? `；共享桌(不计人数)：${sh}` : '');
+        const items = S.records[id].items.filter(pred);
+        const normal = items.filter(it => !it.shared);
+        const n = normal.reduce((a, it) => a + it.size, 0);
+        const tb = normal.map(it => `${it.table}(${it.size}人)`).join('、') || '无';
+        const sh = items.filter(it => it.shared).map(it => `${it.table}(${it.size}人)`).join('、');
+        return `${i + 1}.${wname(id)} 共${n}人，${items.length}桌，桌号：${tb}` + (sh ? `；共享桌(不计人数)：${sh}` : '');
       }).join('；');
     }
+    // 导出文本：按时间自动分成 上午班 / 晚班 两部分
     function logToText(date, entries) {
-      return `Whose Next 排班日志 ${date}\n` + entries.map(e => `[${fmtTime(e.t)}] ${e.text}` + (e.st ? `\n           当前人数：${e.st}` : '')).join('\n') + '\n';
+      const sh = splitShifts(entries);
+      const fmt = e => `[${fmtTime(e.t)}] ${e.text.replace(/\n/g, '\n           ')}` + (e.st ? `\n           当前人数：${e.st}` : '');
+      const sec = k => `===== ${SHIFT_NAME[k]}（${shiftRange(k)}）=====\n` + (sh[k].map(fmt).join('\n') || '(无记录)');
+      return `Whose Next 排班日志 ${date}\n` + sec('morning') + '\n\n' + sec('evening') + '\n';
     }
     function download(name, text) {
       const a = document.createElement('a');
@@ -560,7 +624,7 @@
       const id = nextWaiter();
       if (!id) return;
       const r = S.records[id], before = r.count;
-      const item = { id: uid(), table, size, shared: isShared(size) };
+      const item = { id: uid(), table, size, shared: isShared(size), t: Date.now() };
       r.items.push(item);
       S.history.push({ id: item.id, waiterId: id, time: Date.now() });
       recount();
@@ -595,6 +659,51 @@
       save();
     }
 
+    /* ---------- 占位 / 释放 ----------
+       分配后该桌即为「占位」，直到点击占位桌并释放；人数、桌数记录不受影响。 */
+    function occupantOf(code, exceptId) {
+      for (const wid in S.records) {
+        const item = S.records[wid].items.find(it => it.table === code && !it.released && it.id !== exceptId);
+        if (item) return { waiterId: wid, item, r: S.records[wid] };
+      }
+      return null;
+    }
+    function openRelease(code) { ui.release = code; render(); }
+    function closeRelease() { ui.release = null; render(); }
+    function doRelease() {
+      const code = ui.release, now = Date.now();
+      const f = occupantOf(code);
+      if (!f) return closeRelease();
+      for (const wid in S.records) {
+        S.records[wid].items.forEach(it => { if (it.table === code && !it.released) it.released = now; });
+      }
+      addLog('release', `释放占位：${code}（${wname(f.waiterId)}，${f.item.shared ? '共享桌 ' : ''}${f.item.size}人，入座 ${fmtTime(f.item.t)}）`);
+      save();
+      closeRelease();
+    }
+    function editFromRelease() {
+      const f = occupantOf(ui.release);
+      ui.release = null;
+      if (f) openEdit(f.item.id); else render();
+    }
+    function viewRelease() {
+      const code = ui.release, f = occupantOf(code);
+      if (!f) { ui.release = null; return ''; }
+      const it = f.item;
+      return `<div class="mask" onclick="if(event.target===this)closeRelease()"><div class="modal">
+    <h3>释放占位 · ${esc(code)}</h3>
+    <div class="hint">服务员：<b>${esc(wname(f.waiterId))}</b></div>
+    <div class="lbl">入座信息</div>
+    <div>${it.shared ? `共享桌 ${it.size} 人（不计人数）` : `${it.size} 人`} · 入座 ${fmtTime(it.t)}</div>
+    <div class="hint" style="margin-top:10px">释放后该桌可重新分配；已记录的服务人数和桌数不会改变。</div>
+    <div class="actions">
+      <button class="btn gray" onclick="closeRelease()">取消</button>
+      <button class="btn gray" onclick="editFromRelease()">修改分配</button>
+      <button class="btn" onclick="doRelease()">释放占位</button>
+    </div>
+  </div></div>`;
+    }
+
     /* ---------- 修改弹窗 ---------- */
     function editCodes() {
       const codes = S.tables.map(t => t.code);
@@ -608,7 +717,12 @@
       render();
     }
     function closeEdit() { ui.edit = null; render(); }
-    function editPick(i) { ui.edit.table = editCodes()[i]; render(); }
+    // 目标桌被其他客人占位时不能换过去（本条已释放则不占桌，不受限）
+    function editConflict(c) {
+      const f = findItem(ui.edit.id);
+      return f && !f.item.released && occupantOf(c, ui.edit.id);
+    }
+    function editPick(i) { const c = editCodes()[i]; if (editConflict(c)) return; ui.edit.table = c; render(); }
     function editStep(d) { ui.edit.size = Math.max(1, (ui.edit.size || 0) + d); render(); }
     function editTyping(v) {            // 打字时不整页重绘，避免丢焦点
       const n = parseInt(v, 10);
@@ -626,6 +740,7 @@
     function saveEdit() {
       const e = ui.edit, t = S.tables.find(t => t.code === e.table);
       if (!e.size) return;
+      if (editConflict(e.table)) return alert(`${e.table} 已被占位，请先释放或选择其他桌`);
       if (t && !isShared(e.size) && e.size > t.cap &&
         !confirm(`${t.code} 最多坐 ${t.cap} 人，当前 ${e.size} 人，仍要保存吗？`)) return;
       editEntry(e.id, e.table, e.size);
@@ -637,6 +752,7 @@
       closeEdit();
     }
     function viewModal() {
+      if (ui.release) return viewRelease();
       const e = ui.edit;
       if (!e) return '';
       const f = findItem(e.id);
@@ -647,7 +763,8 @@
     <div class="lbl">餐桌</div>
     <div class="tables">${editCodes().map((c, i) => {
         const t = S.tables.find(t => t.code === c);
-        return `<button class="${e.table === c ? 'sel' : ''}" onclick="editPick(${i})">${esc(c)}${t ? ` <small>/${t.cap}人</small>` : ''}</button>`;
+        const o = editConflict(c);
+        return `<button class="${e.table === c ? 'sel' : ''} ${o ? 'occ' : ''}" ${o ? 'disabled' : ''} onclick="editPick(${i})">${esc(c)}${o ? ' <small>占位</small>' : t ? ` <small>/${t.cap}人</small>` : ''}</button>`;
       }).join('')}</div>
     <div class="lbl">客人人数</div>
     <div class="stepper">
@@ -723,16 +840,21 @@
 
     function viewLog() {
       const line = e => `<div class="logline ${e.type}"><span class="t">${fmtTime(e.t)}</span>${esc(e.text)}${e.st ? `<span class="st">当前人数：${esc(e.st)}</span>` : ''}</div>`;
+      const sh = splitShifts(S.log);
+      const section = k => `<div class="shift">${SHIFT_NAME[k]}<small>${shiftRange(k)} · ${sh[k].length} 条</small></div>`
+        + (sh[k].slice().reverse().map(line).join('') || '<div class="hint">暂无记录</div>');
       return `
   <div class="card">
     <h3>${S.started ? '<span class="live"></span>' : ''}今日日志（${fmtDate(Date.now())}）
       <button class="mini" style="float:right;color:#444" ${S.log.length ? '' : 'disabled'} onclick="exportToday()">导出 .txt</button></h3>
-    ${S.log.slice().reverse().map(line).join('') || '<div class="empty">今天还没有记录</div>'}
+    ${S.log.length ? section('evening') + section('morning') : '<div class="empty">今天还没有记录</div>'}
   </div>
   ${S.logArchive.length ? `<div class="card"><h3>往日日志</h3>
     ${S.logArchive.slice().reverse().map((a, k) => {
-        const i = S.logArchive.length - 1 - k; return `<div class="logline row" style="justify-content:space-between">
-      <span>${esc(a.date)} <span class="hint">${a.entries.length} 条</span></span>
+        const i = S.logArchive.length - 1 - k;
+        const x = splitShifts(a.entries);
+        return `<div class="logline row" style="justify-content:space-between">
+      <span>${esc(a.date)} <span class="hint">上午班 ${x.morning.length} 条 · 晚班 ${x.evening.length} 条</span></span>
       <span><button class="mini" style="color:#444" onclick="exportArchive(${i})">导出</button>
       <button class="mini" onclick="delArchive(${i})">删除</button></span></div>`;
       }).join('')}</div>` : ''}`;
@@ -752,9 +874,13 @@
 
   <div class="card">
     <h3>客人到店</h3>
-    <div class="label hint">选择餐桌</div>
-    <div class="tables">${S.tables.map(t =>
-        `<button class="${ui.table === t.code ? 'sel' : ''}" onclick="pickTable('${esc(t.code)}')">${esc(t.code)} <small>/${t.cap}人</small></button>`).join('')
+    <div class="label hint">选择餐桌（红色 = 占位中，点击可释放）</div>
+    <div class="tables">${S.tables.map(t => {
+          const o = occupantOf(t.code);
+          return o
+            ? `<button class="occ" onclick="openRelease('${esc(t.code)}')">${esc(t.code)} <small>占位·${esc(wname(o.waiterId))}·${o.item.size}人</small></button>`
+            : `<button class="${ui.table === t.code ? 'sel' : ''}" onclick="pickTable('${esc(t.code)}')">${esc(t.code)} <small>/${t.cap}人</small></button>`;
+        }).join('')
         || '<span class="empty">请先到「配置」添加餐桌</span>'}</div>
     <div class="label hint">客人人数</div>
     <div class="quick">${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(n =>
@@ -773,7 +899,7 @@
             return `<div class="w ${id === nid ? 'is-next' : ''}">
         <span class="badge">${i + 1}</span>
         <div class="info"><b>${esc(wname(id))}</b> ${id === nid ? '<span class="chip">下一位</span>' : ''}
-          <div>${r.items.map(it => `<button class="chip editable ${it.shared ? 'share' : ''}" onclick="openEdit('${it.id}')">${esc(it.table)}${it.shared ? ' 共享·' + it.size + '人(不计)' : '·' + it.size + '人'}</button>`).join('') || '<span class="hint">暂无</span>'}</div>
+          <div>${r.items.map(it => `<button class="chip editable ${it.shared ? 'share' : ''} ${it.released ? 'released' : ''}" title="${it.released ? '已释放' : '占位中'}" onclick="openEdit('${it.id}')">${esc(it.table)}${it.shared ? ' 共享·' + it.size + '人(不计)' : '·' + it.size + '人'}</button>`).join('') || '<span class="hint">暂无</span>'}</div>
         </div>
         <div class="cnt">${r.count}<small> 人</small> <span style="color:#555">${r.items.length}</span><small> 桌</small>${sharedOf(id).length ? `<div class="hint" style="font-size:12px;font-weight:400;color:#1971c2">含共享 ${sharedOf(id).length} 桌</div>` : ''}</div>
       </div>`;
@@ -830,7 +956,11 @@
     }
     function endDay() {
       if (!confirm('结束今天？当天记录将清空')) return;
-      addLog('end', `结束营业。汇总：${summary()}`);
+      const inShift = k => it => shiftOf(it.t) === k;
+      addLog('end', `结束营业。
+全天：${summary()}
+${SHIFT_NAME.morning}（${shiftRange('morning')}）：${summary(inShift('morning'))}
+${SHIFT_NAME.evening}（${shiftRange('evening')}）：${summary(inShift('evening'))}`);
       S.logArchive.push({ date: fmtDate(S.log[0].t), entries: S.log });
       S.logArchive = S.logArchive.slice(-60); // 最多保留 60 天
       S.started = false; S.records = {}; S.history = []; S.onDuty = []; S.log = [];
@@ -853,6 +983,7 @@
       document.getElementById('assignBtn').disabled = !(ui.table && ui.size >= 1);
     }
     function doAssign() {
+      if (occupantOf(ui.table)) { ui.table = null; render(); return alert('该桌已被占位，请先释放'); }
       const t = S.tables.find(t => t.code === ui.table);
       if (t && ui.size > t.cap && ui.size <= SHARE_THRESHOLD &&
         !confirm(`${t.code} 最多坐 ${t.cap} 人，当前 ${ui.size} 人，仍要分配吗？`)) return;
@@ -875,9 +1006,14 @@
         });
       }
       S.history = S.history.filter(h => h.id);
+      for (const wid in S.records) {      // 补上入座时间（用于划分班次、显示入座时间）
+        S.records[wid].items.forEach(it => {
+          if (!it.t) it.t = (S.history.find(h => h.id === it.id) || {}).time || Date.now();
+        });
+      }
       recount();
     })();
-    document.addEventListener('keydown', e => { if (e.key === 'Escape' && ui.edit) closeEdit(); });
+    document.addEventListener('keydown', e => { if (e.key !== 'Escape') return; if (ui.release) closeRelease(); else if (ui.edit) closeEdit(); });
     // 首次使用（浏览器里还没有服务员和餐桌）时自动读取 config.js
     if (!S.waiters.length && !S.tables.length) { applyConfig(); save(); }
     render();
