@@ -526,6 +526,17 @@
       font-size: 13px;
     }
 
+    .logo-card {
+      text-align: center;
+      padding: 40px 16px;
+    }
+
+    .logo-card img {
+      width: 78%;
+      max-width: 340px;
+      height: auto;
+    }
+
     .sync {
       font-size: 12px;
       opacity: .95;
@@ -1285,7 +1296,11 @@
     }
 
     function viewAssign() {
-      if (!S.started) return `<div class="card empty">${admin ? '请先在「今日上岗」勾选服务员并开始营业' : (FB && !syncReady ? '正在连接…' : '前台还没有开始营业')}</div>`;
+      if (!S.started) {
+        if (admin) return `<div class="card empty">请先在「今日上岗」勾选服务员并开始营业</div>`;
+        if (FB && !syncReady) return `<div class="card empty">正在连接…</div>`;
+        return `<div class="card logo-card"><img src="images/logo.png" alt="Restaurant logo"></div>`;   // 前台还没开始营业：显示店标
+      }
       const nid = nextWaiter();
       const shared = ui.size > SHARE_THRESHOLD;
       const ready = ui.table && ui.size >= 1;
