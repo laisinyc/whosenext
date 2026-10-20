@@ -703,7 +703,7 @@
     }
     function importConfig() { if (needAdmin()) return;
       if (!window.WHOSENEXT_CONFIG) return alert('没有找到 config.js，请确认它和 index.html 在同一目录');
-      if (S.started) return alert('营业中不能导入，请先在「今日上岗」结束今天');
+      if (S.started) return alert('营业中不能导入，请先在「今日上岗」结束当前');
       if (!confirm('用 config.js 覆盖当前的服务员和餐桌列表？')) return;
       applyConfig(); save(); render();
     }
@@ -1267,7 +1267,7 @@
       }).join('')}
     <div style="margin-top:12px" class="row">
       ${locked
-          ? `<button class="btn red" onclick="endDay()">结束今天 / 重新开始</button>`
+          ? `<button class="btn red" onclick="endDay()">结束当前 / 重新开始</button>`
           : `<button class="btn" ${S.onDuty.length ? '' : 'disabled'} onclick="startDay()">开始营业（${S.onDuty.length} 人）</button>`}
     </div>
   </div>`;
@@ -1377,7 +1377,7 @@ ${admin ? `  <div class="card">
       document.getElementById('wName').focus();
     }
     function delWaiter(id) { if (needAdmin()) return;
-      if (S.started && S.onDuty.includes(id)) return alert('该服务员今日在岗，请先结束今天再删除');
+      if (S.started && S.onDuty.includes(id)) return alert('该服务员今日在岗，请先结束当前再删除');
       S.waiters = S.waiters.filter(w => w.id !== id);
       S.onDuty = S.onDuty.filter(x => x !== id);
       save(); render();
@@ -1405,7 +1405,7 @@ ${admin ? `  <div class="card">
       save(); ui.tab = 'assign'; render();
     }
     function endDay() { if (needAdmin()) return;
-      if (!confirm('结束今天？当天记录将清空')) return;
+      if (!confirm('结束当前？当天记录将清空')) return;
       const inShift = k => it => shiftOf(it.t) === k;
       addLog('end', `结束营业。
 全天：${summary()}
