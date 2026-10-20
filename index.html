@@ -1255,6 +1255,7 @@
       if (!S.waiters.length) return `<div class="card empty">请先到「配置」添加服务员</div>`;
       const locked = S.started;
       return `
+  ${restoreCard()}
   <div class="card">
     <h3>勾选今天在职的服务员 <span class="hint">（勾选顺序 = 初始排序）</span></h3>
     ${S.waiters.map(w => {
@@ -1297,7 +1298,7 @@
 
     function viewAssign() {
       if (!S.started) {
-        if (admin) return `<div class="card empty">请先在「今日上岗」勾选服务员并开始营业</div>`;
+        if (admin) return restoreCard() + `<div class="card empty">请先在「今日上岗」勾选服务员并开始营业</div>`;
         if (FB && !syncReady) return `<div class="card empty">正在连接…</div>`;
         return `<div class="card logo-card"><img src="images/logo.png" alt="Restaurant logo"></div>`;   // 前台还没开始营业：显示店标
       }
@@ -1404,17 +1405,51 @@ ${admin ? `  <div class="card">
       addLog('start', `开始营业，上岗顺序：${S.onDuty.map((id, i) => `${i + 1}.${wname(id)}`).join(' ')}；下一位：${wname(nextWaiter())}`);
       save(); ui.tab = 'assign'; render();
     }
+    /* ---------- 结束当前 / 恢复营业 ----------
+       结束时把当天的完整状态（上岗顺序、每桌分配、日志）另存一份到 S.lastEnded，
+       24 小时内、且还没开始新的营业时，可以在「今日上岗」页点「恢复营业」原样找回。 */
+    const RESTORE_MS = 24 * 3600 * 1000;
+    const restorable = () => !!S.lastEnded && Date.now() - S.lastEnded.at < RESTORE_MS;
     function endDay() { if (needAdmin()) return;
-      if (!confirm('结束当前？当天记录将清空')) return;
+      const occ = S.onDuty.reduce((n, id) => n + activeOf(id), 0);
+      if (!confirm(`结束当前营业？\n${occ ? `⚠ 还有 ${occ} 桌占位中。\n` : ''}结束后 24 小时内，可在「今日上岗」页点「恢复营业」找回当天数据。`)) return;
+      const snapshot = JSON.parse(JSON.stringify({ onDuty: S.onDuty, records: S.records, history: S.history, log: S.log }));   // 结束前的完整状态
+      const hadActivity = S.history.length > 0 || Object.values(S.records).some(r => r.items.length);
       const inShift = k => it => shiftOf(it.t) === k;
       addLog('end', `结束营业。
 全天：${summary()}
 ${SHIFT_NAME.morning}（${shiftRange('morning')}）：${summary(inShift('morning'))}
 ${SHIFT_NAME.evening}（${shiftRange('evening')}）：${summary(inShift('evening'))}`);
-      S.logArchive.push({ date: fmtDate(S.log[0].t), entries: S.log });
+      const at = Date.now();
+      S.logArchive.push({ date: fmtDate(S.log[0].t), entries: S.log, endedAt: at });
       S.logArchive = S.logArchive.slice(-60); // 最多保留 60 天
+      // 如果这次结束的是一个空的营业（比如误点了开始又结束），不要盖掉之前还能恢复的那份
+      if (hadActivity || !restorable()) S.lastEnded = { at, ...snapshot };
       S.started = false; S.records = {}; S.history = []; S.onDuty = []; S.log = []; S.undoStack = []; S.redoStack = [];
       save(); render();
+    }
+    function restoreDay() { if (needAdmin()) return;
+      const e = S.lastEnded;
+      if (!restorable() || S.started) return;
+      if (!confirm(`恢复 ${fmtDate(e.at)} ${fmtTime(e.at)} 结束的营业？\n上岗顺序、每桌分配和日志都会原样恢复。`)) return;
+      const snap = JSON.parse(JSON.stringify(e));
+      S.onDuty = snap.onDuty; S.records = snap.records; S.history = snap.history; S.log = snap.log;
+      S.logArchive = S.logArchive.filter(a => a.endedAt !== e.at);     // 把当时存进往日日志的那份撤回来
+      S.undoStack = []; S.redoStack = []; S.lastEnded = null; S.started = true;
+      recount();
+      addLog('start', `恢复营业（原结束时间 ${fmtTime(e.at)}）；下一位：${wname(nextWaiter())}`, true);
+      save(); ui.tab = 'assign'; render();
+    }
+    function restoreCard() {
+      if (!restorable() || S.started) return '';
+      const e = S.lastEnded;
+      const tables = Object.values(e.records).reduce((n, r) => n + r.items.length, 0);
+      const people = Object.values(e.records).reduce((n, r) => n + r.count, 0);
+      return `<div class="card" style="border:2px solid #f08c00;background:#fff9db">
+    <h3>刚结束的营业可以恢复</h3>
+    <div class="hint" style="margin:0 0 10px">${fmtDate(e.at)} ${fmtTime(e.at)} 结束 · ${e.onDuty.length} 位服务员 · 共 ${tables} 桌 / ${people} 人。结束后 24 小时内、还没开始新营业时可以恢复。</div>
+    <button class="btn" onclick="restoreDay()">恢复营业</button>
+  </div>`;
     }
     function pickTable(c) {   // 选桌后整页重绘，需保留「其他」输入框的内容
       ui.table = c; render();
@@ -1442,7 +1477,7 @@ ${SHIFT_NAME.evening}（${shiftRange('evening')}）：${summary(inShift('evening
     }
     function doUndo() { if (needAdmin()) return; undo(); render(); }
     function doRedo() { if (needAdmin()) return; redo(); render(); }
-    function resetAll() { if (needAdmin()) return; if (confirm('确定清空所有数据？')) { localStorage.removeItem(KEY); S = load(); ui = { tab: 'config' }; save(); render(); } }
+    function resetAll() { if (needAdmin()) return; if (prompt('⚠ 这会清空所有数据（服务员、餐桌、往日日志、可恢复的营业记录），开启同步时云端数据也会被清空，且无法恢复。\n请输入“清空”确认：') === '清空') { localStorage.removeItem(KEY); S = load(); ui = { tab: 'config' }; save(); render(); } }
 
     document.getElementById('nav').addEventListener('click', e => {
       if (e.target.dataset.tab) { ui.tab = e.target.dataset.tab; render(); }
