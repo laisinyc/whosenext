@@ -17,6 +17,7 @@ window.WHOSENEXT_CONFIG = {
     "Ava",
     "Wenjie",
     "Ge",
+    "Who"
   ],
 
   // 餐桌：code = 桌号/代号，cap = 最多可坐人数
@@ -38,6 +39,7 @@ window.WHOSENEXT_CONFIG = {
     { code: "E1", cap: 4 },   // 大桌
     { code: "E2", cap: 4 },   // 大桌
     { code: "S123", cap: 12 },   // 大桌
+    { code: "X0", cap: 8 },   // 大桌
   ],
 
   // 餐桌排列（俯瞰图）：每行一个字符串，格子用空格分隔；"." 表示空位；
@@ -45,8 +47,8 @@ window.WHOSENEXT_CONFIG = {
   // 没写进这里的桌子会排在下面；不想用平面图就删掉整个 tableLayout。
   tableLayout: [
     "S123 S123 S123 S123",
-    "A6   B6   C6   .",
-    "A5   B45  C45  .",
+    "A6   B6   C6   X0",
+    "A5   B45  C45  X0",
     "A4   B45  C45  .",
     "A3   B23  C23  .",
     "A2   B23  C23  E2",
