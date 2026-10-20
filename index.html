@@ -654,8 +654,10 @@
 
     // 当前排班快照：按初始顺序列出每位服务员已服务人数
     const sharedOf = id => S.records[id].items.filter(it => it.shared);
+    // 当前占位（未释放）的桌数
+    const activeOf = id => S.records[id].items.filter(it => !it.released).length;
     // 共享桌只留记录，不计入人数；这里单独标出共享桌数量
-    const standings = () => S.onDuty.map(id => `${wname(id)} ${S.records[id].count}人/${S.records[id].items.length}桌` + (sharedOf(id).length ? `(含共享${sharedOf(id).length}桌)` : '')).join(' | ');
+    const standings = () => S.onDuty.map(id => `${wname(id)} ${S.records[id].count}人/${S.records[id].items.length}桌/占位${activeOf(id)}` + (sharedOf(id).length ? `(含共享${sharedOf(id).length}桌)` : '')).join(' | ');
     function addLog(type, text, withStandings) {
       S.log.push({ t: Date.now(), type, text, st: withStandings ? standings() : '' });
     }
@@ -788,7 +790,7 @@
       for (const wid in S.records) {
         S.records[wid].items.forEach(it => { if (it.table === code && !it.released) it.released = now; });
       }
-      addLog('release', `释放占位：${code}（${wname(f.waiterId)}，${f.item.shared ? '共享桌 ' : ''}${f.item.size}人，入座 ${fmtTime(f.item.t)}）`);
+      addLog('release', `释放占位：${code}（${wname(f.waiterId)}，${f.item.shared ? '共享桌 ' : ''}${f.item.size}人，入座 ${fmtTime(f.item.t)}）`, true);
       save();
       closeRelease();
     }
@@ -1004,7 +1006,7 @@
   <div class="card next">
     <div class="label">下一位服务员</div>
     <div class="name">${esc(wname(nid))}</div>
-    <div class="label">当前已服务 ${S.records[nid].count} 人 · ${S.records[nid].items.length} 桌</div>
+    <div class="label">当前已服务 ${S.records[nid].count} 人 · ${S.records[nid].items.length} 桌 · 占位 ${activeOf(nid)} 桌</div>
   </div>
 
   <div class="card">
@@ -1038,7 +1040,7 @@
         <div class="info"><b>${esc(wname(id))}</b> ${id === nid ? '<span class="chip">下一位</span>' : ''}
           <div>${r.items.map(it => `<button class="chip editable ${it.shared ? 'share' : ''} ${it.released ? 'released' : ''}" title="${it.released ? '已释放' : '占位中'}" onclick="openEdit('${it.id}')">${esc(it.table)}${it.shared ? ' 共享·' + it.size + '人(不计)' : '·' + it.size + '人'}</button>`).join('') || '<span class="hint">暂无</span>'}</div>
         </div>
-        <div class="cnt">${r.count}<small> 人</small> <span style="color:#555">${r.items.length}</span><small> 桌</small>${sharedOf(id).length ? `<div class="hint" style="font-size:12px;font-weight:400;color:#1971c2">含共享 ${sharedOf(id).length} 桌</div>` : ''}</div>
+        <div class="cnt">${r.count}<small> 人</small> <span style="color:#555">${r.items.length}</span><small> 桌</small><div class="hint" style="font-size:12px;font-weight:600;color:${activeOf(id) ? '#c92a2a' : '#868e96'}">占位 ${activeOf(id)} 桌</div>${sharedOf(id).length ? `<div class="hint" style="font-size:12px;font-weight:400;color:#1971c2">含共享 ${sharedOf(id).length} 桌</div>` : ''}</div>
       </div>`;
           }).join('')}
   </div>
