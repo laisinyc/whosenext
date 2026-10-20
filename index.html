@@ -543,6 +543,29 @@
       color: #c92a2a;
     }
 
+    .gbtn {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      margin-top: 14px;
+      padding: 11px;
+      border: 1px solid #dadce0;
+      border-radius: 8px;
+      background: #fff;
+      color: #3c4043;
+      font-size: 15px;
+      font-weight: 600;
+    }
+
+    .or {
+      margin: 14px 0 0;
+      text-align: center;
+      color: var(--mute);
+      font-size: 12px;
+    }
+
     .login-err {
       min-height: 18px;
       margin-top: 8px;
@@ -640,6 +663,9 @@
     // 配了 config.js 的 firebase 就启用多设备同步，前台改用 Firebase 账号登录（此时 admin 账号密码不再使用）
     const FB = CFG.firebase && CFG.firebase.databaseURL ? CFG.firebase : null;
     const HAS_LOGIN = !!(FB || (CFG.admin && CFG.admin.username));
+    // 可选：只有这些邮箱能进入前台界面（界面层的限制；真正的写入权限由 Firebase 规则控制）
+    const ADMIN_EMAILS = ((FB && FB.adminEmails) || []).map(e => String(e).trim().toLowerCase()).filter(Boolean);
+    const isAllowed = u => !!u && (!ADMIN_EMAILS.length || ADMIN_EMAILS.includes(String(u.email || '').toLowerCase()));
     const AUTH = CFG.admin && CFG.admin.username ? { u: String(CFG.admin.username), p: String(CFG.admin.password || '') } : null;
     function hashStr(str) { let h = 5381; for (let i = 0; i < str.length; i++) h = ((h * 33) ^ str.charCodeAt(i)) >>> 0; return h.toString(36); }
     const authSig = () => AUTH ? hashStr(AUTH.u + '\n' + AUTH.p) : '';
@@ -1076,6 +1102,7 @@
       onValue(ref(fb.db, '.info/connected'), snap => { syncStatus = snap.val() ? 'online' : 'offline'; renderHeader(); });
       onValue(ref(fb.db, SYNC_PATH + '/state'), snap => onRemoteState(snap.val()), err => { console.warn(err); syncStatus = 'error'; renderHeader(); });
       fb.A.onAuthStateChanged(fb.auth, user => {
+        if (user && !isAllowed(user)) { fb.A.signOut(fb.auth).catch(() => { }); user = null; }   // 不在允许名单里：当作未登录
         admin = !!user;
         if (admin) {
           if (!unsubArchive) unsubArchive = onValue(ref(fb.db, SYNC_PATH + '/archive'), snap => onRemoteArchive(snap.val()), () => { });
@@ -1092,27 +1119,50 @@
       setTimeout(() => { const u = document.getElementById('loginUser'); if (u) u.focus(); }, 0);
     }
     function closeLogin() { ui.login = null; render(); }
+    function loginErrMsg(e) {
+      const c = e.code || '';
+      return /network/i.test(c) ? '网络错误，请重试'
+        : /too-many-requests/.test(c) ? '尝试次数过多，请稍后再试'
+          : /invalid-credential|wrong-password|user-not-found|invalid-email|missing-password/.test(c) ? '用户名或密码错误'
+            : /popup-blocked/.test(c) ? '浏览器拦截了登录弹窗，请允许弹窗后重试'
+              : /unauthorized-domain/.test(c) ? '当前网址未加入 Firebase 授权域名（Authentication → 设置 → 授权域名）'
+                : /operation-not-allowed/.test(c) ? 'Firebase 里还没有启用这种登录方式'
+                  : `登录失败（${c || e.message}）`;
+    }
+    function loginOk() {
+      admin = true; ui.login = null;
+      ui.tab = S.started ? 'assign' : (S.waiters.length ? 'duty' : 'config'); render();
+    }
     async function doLogin() {
       const u = document.getElementById('loginUser').value.trim(), p = document.getElementById('loginPass').value;
       const err = m => { document.getElementById('loginErr').textContent = m; document.getElementById('loginPass').value = ''; };
       if (FB) {                                   // 同步模式：用 Firebase 账号（邮箱 + 密码）
         if (!fb) return err('无法连接同步服务，请检查网络后重试');
-        try { await fb.A.signInWithEmailAndPassword(fb.auth, u, p); }
-        catch (e) {
-          const c = e.code || '';
-          return err(/network/i.test(c) ? '网络错误，请重试'
-            : /too-many-requests/.test(c) ? '尝试次数过多，请稍后再试'
-              : /invalid-credential|wrong-password|user-not-found|invalid-email|missing-password/.test(c) ? '用户名或密码错误'
-                : `登录失败（${c || e.message}）`);
-        }
-        admin = true; ui.login = null;
-        ui.tab = S.started ? 'assign' : (S.waiters.length ? 'duty' : 'config'); render();
-        return;
+        let cred;
+        try { cred = await fb.A.signInWithEmailAndPassword(fb.auth, u, p); }
+        catch (e) { return err(loginErrMsg(e)); }
+        if (!isAllowed(cred.user)) { fb.A.signOut(fb.auth).catch(() => { }); return err('该账号没有前台权限'); }
+        return loginOk();
       }
       if (u === AUTH.u && p === AUTH.p) {
-        admin = true; localStorage.setItem(AUTH_KEY, authSig()); ui.login = null;
-        ui.tab = S.started ? 'assign' : (S.waiters.length ? 'duty' : 'config'); render();
+        localStorage.setItem(AUTH_KEY, authSig()); loginOk();
       } else err('用户名或密码错误');
+    }
+    // Google 登录（弹窗）。需要在 Firebase 启用 Google 登录，并把网站域名加入授权域名
+    async function doGoogleLogin() {
+      const el = document.getElementById('loginErr'); el.textContent = '';
+      if (!fb) { el.textContent = '无法连接同步服务，请检查网络后重试'; return; }
+      let cred;
+      try {
+        const provider = new fb.A.GoogleAuthProvider();
+        provider.setCustomParameters({ prompt: 'select_account' });
+        cred = await fb.A.signInWithPopup(fb.auth, provider);
+      } catch (e) {
+        if (/popup-closed|cancelled-popup/.test(e.code || '')) return;   // 用户自己关了弹窗
+        el.textContent = loginErrMsg(e); return;
+      }
+      if (!isAllowed(cred.user)) { fb.A.signOut(fb.auth).catch(() => { }); el.textContent = '该 Google 账号没有前台权限'; return; }
+      loginOk();
     }
     function logout() {
       admin = false; localStorage.removeItem(AUTH_KEY);
@@ -1124,6 +1174,8 @@
       return `<div class="mask" onclick="if(event.target===this)closeLogin()"><div class="modal">
     <h3>前台登录</h3>
     <div class="hint">服务员无需登录，直接查看即可；前台登录后才能分配、修改、释放和配置。</div>
+    ${FB ? `<button class="gbtn" onclick="doGoogleLogin()"><svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.9 6.1C12.4 13.6 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.5 5.8c4.4-4.1 7.1-10.1 7.1-17.5z"/><path fill="#FBBC05" d="M10.5 28.7a14.500 14.500 0 0 1 0-9.4l-7.9-6.1a24 24 0 0 0 0 21.600l7.900-6.100z"/><path fill="#34A853" d="M24 48c6.500 0 11.900-2.100 15.900-5.800l-7.500-5.800c-2.100 1.400-4.800 2.300-8.400 2.300-6.300 0-11.600-4.100-13.500-9.800l-7.900 6.100C6.500 42.600 14.600 48 24 48z"/></svg>使用 Google 登录</button>
+    <div class="or">— 或使用邮箱密码 —</div>` : ''}
     <div class="lbl">${FB ? '用户名（邮箱）' : '用户名'}</div>
     <input class="full" id="loginUser" type="text" autocomplete="username" autocapitalize="off" onkeydown="if(event.key==='Enter')document.getElementById('loginPass').focus()">
     <div class="lbl">密码</div>

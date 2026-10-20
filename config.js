@@ -70,6 +70,9 @@ window.WHOSENEXT_CONFIG = {
     databaseURL: "https://who-s-next-92eb3-default-rtdb.firebaseio.com",
     projectId: "who-s-next-92eb3",
     appId: "1:898834949674:web:571faf7f2b5cb7ec4d0553",
+    // 可选：只允许这些邮箱进入前台界面（Google 或邮箱密码登录都适用），留空 = 不限制界面。
+    // 真正的写入权限由 Firebase 规则控制（见 README）。
+    adminEmails: [],
   },
 
   // 共享桌阈值：客人人数 大于 该值 时为共享桌（只记桌号，不计人数）

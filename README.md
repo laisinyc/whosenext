@@ -72,3 +72,24 @@
 7. 提交并发布更新（`git push origin main && git push origin main:gh-pages`，约一两分钟生效），前台打开页面点「前台登录」，用第 4 步的邮箱和密码登录；服务员直接打开网址即可看到实时数据
 
 注意：数据（服务员名字、当天分配）存放在这个 Firebase 项目里，且“任何人可读”；如果不想公开，请不要把网址发给外人。
+
+## 使用 Google 账号登录前台（可选）
+
+登录弹窗里有「使用 Google 登录」按钮，也可以继续用邮箱密码。启用步骤：
+
+1. Firebase 控制台 → Authentication → 登录方法 → **Google → 启用**（填项目公开名称和支持邮箱，保存）
+2. Authentication → **设置 → 授权域名 → 添加域名**，加入 `laisinyc.github.io`（本地测试用的 `localhost` 默认已有）。不加的话线上点 Google 登录会提示“当前网址未加入 Firebase 授权域名”
+3. 把前台用的 Google 邮箱加进 Realtime Database 规则的写入名单（多个邮箱用 `||` 连接），点「发布」：
+   ```json
+   {
+     "rules": {
+       "whosenext": {
+         ".read": true,
+         ".write": "auth != null && (auth.token.email == 'frontdesk@你的店名.com' || auth.token.email == '你的Google邮箱@gmail.com')"
+       }
+     }
+   }
+   ```
+   不在名单里的 Google 账号即使登录成功也写不了数据
+4. （可选）在 `config.js` 的 `firebase.adminEmails` 里写上允许的邮箱，不在名单里的账号登录后会被自动退出、也看不到前台界面；留空则不限制界面（写入权限仍由上面的规则控制）
+5. 手机上如果弹窗被拦截，请允许该网站的弹窗；已安装到主屏幕的应用同样适用
