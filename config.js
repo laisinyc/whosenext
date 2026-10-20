@@ -61,6 +61,17 @@ window.WHOSENEXT_CONFIG = {
   // 部署前请改掉默认密码；删掉整个 admin 则不需要登录（所有人都能操作）。
   admin: { username: "frontdesk", password: "123456" },
 
+  // 多设备同步（Firebase Realtime Database）：让服务员的手机实时看到前台的分配情况。
+  // 不需要同步就保持下面全部留空（数据只存在各自设备上）。设置步骤见 README「多设备同步」。
+  // 填写后，前台改用 Firebase 账号（邮箱+密码）登录，上面的 admin 账号密码不再使用。
+  firebase: {
+    apiKey: "AIzaSyCoxP4rlNzFPubKcJa2dfw5trRgONmf0G4",
+    authDomain: "who-s-next-92eb3.firebaseapp.com",
+    databaseURL: "https://who-s-next-92eb3-default-rtdb.firebaseio.com",
+    projectId: "who-s-next-92eb3",
+    appId: "1:898834949674:web:571faf7f2b5cb7ec4d0553",
+  },
+
   // 共享桌阈值：客人人数 大于 该值 时为共享桌（只记桌号，不计人数）
   shareThreshold: 5,
 

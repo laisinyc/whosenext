@@ -524,6 +524,15 @@
       font-size: 13px;
     }
 
+    .sync {
+      font-size: 12px;
+      opacity: .95;
+    }
+
+    .sync.error {
+      font-weight: 700;
+    }
+
     .tables button.ro:disabled {
       opacity: 1;
       cursor: default;
@@ -628,11 +637,14 @@
        账号密码写在 config.js 的 admin 里。注意：这是静态网页，账号密码对能打开网页的人是可见的，
        只能防误操作，不能防有意的人。没配置 admin 时不需要登录（所有人可操作）。 */
     const AUTH_KEY = 'whosenext.admin';
+    // 配了 config.js 的 firebase 就启用多设备同步，前台改用 Firebase 账号登录（此时 admin 账号密码不再使用）
+    const FB = CFG.firebase && CFG.firebase.databaseURL ? CFG.firebase : null;
+    const HAS_LOGIN = !!(FB || (CFG.admin && CFG.admin.username));
     const AUTH = CFG.admin && CFG.admin.username ? { u: String(CFG.admin.username), p: String(CFG.admin.password || '') } : null;
     function hashStr(str) { let h = 5381; for (let i = 0; i < str.length; i++) h = ((h * 33) ^ str.charCodeAt(i)) >>> 0; return h.toString(36); }
     const authSig = () => AUTH ? hashStr(AUTH.u + '\n' + AUTH.p) : '';
     // 登录状态存在本机；config.js 里改了账号或密码后，旧的登录状态自动失效
-    let admin = !AUTH || localStorage.getItem(AUTH_KEY) === authSig();
+    let admin = FB ? false : (!AUTH || localStorage.getItem(AUTH_KEY) === authSig());   // 同步模式下，登录状态由 Firebase 决定
     // 只读状态下点了需要权限的操作：弹出登录窗并拦截
     function needAdmin() { if (admin) return false; openLogin(); return true; }
 
@@ -675,7 +687,7 @@
         redoStack: []       // 重做栈
       };
     }
-    const save = () => localStorage.setItem(KEY, JSON.stringify(S));
+    const save = () => { localStorage.setItem(KEY, JSON.stringify(S)); schedulePush(); };
 
     /* ---------- 图标（内联 SVG，无需外部资源） ---------- */
     const ICON_PATHS = {
@@ -988,24 +1000,117 @@
   </div></div>`;
     }
 
+    /* ---------- 多设备同步（Firebase Realtime Database） ----------
+       前台改动 → 写入云端；服务员（和其他前台设备）实时收到并刷新。
+       云端只存两份 JSON 字符串：state（当天排班）和 archive（往日日志）。撤销/重做栈只在本机。
+       写入权限由 Firebase 规则限制为前台账号（见 README），服务员只能读。 */
+    const SYNC_PATH = 'whosenext';
+    const DIRTY_KEY = 'whosenext.dirty';           // 有尚未成功上传的本地改动
+    const CLIENT_ID = uid();
+    let fb = null;                                 // { db, auth, D(database 模块), A(auth 模块) }
+    let syncStatus = FB ? 'connecting' : 'off';    // connecting | online | offline | error | unavailable
+    let syncReady = false, syncAt = 0, remoteEmpty = false;
+    let lastStateJson = '', lastArchiveJson = '', pushTimer = null, unsubArchive = null;
+
+    const sharedState = () => { const { logArchive, undoStack, redoStack, ...rest } = S; return rest; };
+    const isDirty = () => localStorage.getItem(DIRTY_KEY) === '1';
+
+    function schedulePush() {
+      if (!FB || !fb || !admin) return;
+      localStorage.setItem(DIRTY_KEY, '1');
+      clearTimeout(pushTimer);
+      pushTimer = setTimeout(pushNow, 250);
+    }
+    async function pushNow() {
+      const st = JSON.stringify(sharedState()), ar = JSON.stringify(S.logArchive);
+      try {
+        const { ref, set } = fb.D;
+        if (st !== lastStateJson) { await set(ref(fb.db, SYNC_PATH + '/state'), { v: st, t: Date.now(), by: CLIENT_ID }); lastStateJson = st; }
+        if (ar !== lastArchiveJson) { await set(ref(fb.db, SYNC_PATH + '/archive'), { v: ar, t: Date.now(), by: CLIENT_ID }); lastArchiveJson = ar; }
+        if (JSON.stringify(sharedState()) === st) localStorage.removeItem(DIRTY_KEY);   // 期间没有新改动才算同步完
+        if (syncStatus === 'error') { syncStatus = 'online'; renderHeader(); }
+      } catch (e) {
+        console.warn('同步失败', e);
+        syncStatus = 'error'; renderHeader();
+      }
+    }
+
+    // 收到云端的当天数据（来自其他设备）
+    function onRemoteState(val) {
+      syncReady = true;
+      if (!val) {                         // 云端还没有数据：前台第一次登录时把本机数据传上去
+        remoteEmpty = true;
+        if (admin) schedulePush();
+        return render();
+      }
+      remoteEmpty = false; syncAt = val.t || 0;
+      if (val.by === CLIENT_ID) { lastStateJson = val.v; return renderHeader(); }   // 自己写的回声，忽略
+      if (isDirty()) { schedulePush(); return render(); }                           // 本机有没上传的改动，以本机为准
+      let d; try { d = JSON.parse(val.v); } catch (e) { return; }
+      S = Object.assign({}, d, { logArchive: S.logArchive || [], undoStack: [], redoStack: [] });
+      recount();
+      lastStateJson = val.v;
+      localStorage.setItem(KEY, JSON.stringify(S));      // 存本机，断网时还能看到最后的数据
+      render();
+    }
+    function onRemoteArchive(val) {
+      if (!val || val.by === CLIENT_ID) { if (val) lastArchiveJson = val.v; return; }
+      try { S.logArchive = JSON.parse(val.v); lastArchiveJson = val.v; localStorage.setItem(KEY, JSON.stringify(S)); render(); } catch (e) { }
+    }
+
+    function loadFirebase() {
+      const base = 'https://www.gstatic.com/firebasejs/13.0.0/';
+      return Promise.all([import(base + 'firebase-app.js'), import(base + 'firebase-database.js'), import(base + 'firebase-auth.js')]);
+    }
+    async function initSync() {
+      if (!FB) return;
+      try {
+        const [appM, D, A] = await loadFirebase();
+        const app = appM.initializeApp(FB);
+        fb = { db: D.getDatabase(app), auth: A.getAuth(app), D, A };
+      } catch (e) {
+        console.warn('无法加载 Firebase', e);
+        syncStatus = 'unavailable'; renderHeader(); return;
+      }
+      const { ref, onValue } = fb.D;
+      onValue(ref(fb.db, '.info/connected'), snap => { syncStatus = snap.val() ? 'online' : 'offline'; renderHeader(); });
+      onValue(ref(fb.db, SYNC_PATH + '/state'), snap => onRemoteState(snap.val()), err => { console.warn(err); syncStatus = 'error'; renderHeader(); });
+      fb.A.onAuthStateChanged(fb.auth, user => {
+        admin = !!user;
+        if (admin) {
+          if (!unsubArchive) unsubArchive = onValue(ref(fb.db, SYNC_PATH + '/archive'), snap => onRemoteArchive(snap.val()), () => { });
+          if (isDirty() || remoteEmpty) schedulePush();
+        } else if (unsubArchive) { unsubArchive(); unsubArchive = null; }
+        render();
+      });
+    }
+    const SYNC_TEXT = { connecting: '连接中…', online: '● 已同步', offline: '○ 离线（恢复后自动同步）', error: '⚠ 同步失败', unavailable: '⚠ 无法连接同步服务' };
+
     /* ---------- 前台登录 ---------- */
     function openLogin() {
       ui.login = true; render();
       setTimeout(() => { const u = document.getElementById('loginUser'); if (u) u.focus(); }, 0);
     }
     function closeLogin() { ui.login = null; render(); }
-    function doLogin() {
+    async function doLogin() {
       const u = document.getElementById('loginUser').value.trim(), p = document.getElementById('loginPass').value;
+      const err = m => { document.getElementById('loginErr').textContent = m; document.getElementById('loginPass').value = ''; };
+      if (FB) {                                   // 同步模式：用 Firebase 账号（邮箱 + 密码）
+        if (!fb) return err('无法连接同步服务，请检查网络后重试');
+        try { await fb.A.signInWithEmailAndPassword(fb.auth, u, p); }
+        catch (e) { return err(/network/i.test(e.code || '') ? '网络错误，请重试' : '用户名或密码错误'); }
+        admin = true; ui.login = null;
+        ui.tab = S.started ? 'assign' : (S.waiters.length ? 'duty' : 'config'); render();
+        return;
+      }
       if (u === AUTH.u && p === AUTH.p) {
         admin = true; localStorage.setItem(AUTH_KEY, authSig()); ui.login = null;
         ui.tab = S.started ? 'assign' : (S.waiters.length ? 'duty' : 'config'); render();
-      } else {
-        document.getElementById('loginErr').textContent = '用户名或密码错误';
-        document.getElementById('loginPass').value = '';
-      }
+      } else err('用户名或密码错误');
     }
     function logout() {
       admin = false; localStorage.removeItem(AUTH_KEY);
+      if (FB && fb) fb.A.signOut(fb.auth).catch(() => { });
       ui.edit = ui.release = ui.login = null; ui.table = null; ui.size = null; ui.custom = '';
       render();
     }
@@ -1013,7 +1118,7 @@
       return `<div class="mask" onclick="if(event.target===this)closeLogin()"><div class="modal">
     <h3>前台登录</h3>
     <div class="hint">服务员无需登录，直接查看即可；前台登录后才能分配、修改、释放和配置。</div>
-    <div class="lbl">用户名</div>
+    <div class="lbl">${FB ? '用户名（邮箱）' : '用户名'}</div>
     <input class="full" id="loginUser" type="text" autocomplete="username" autocapitalize="off" onkeydown="if(event.key==='Enter')document.getElementById('loginPass').focus()">
     <div class="lbl">密码</div>
     <input class="full" id="loginPass" type="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()">
@@ -1026,6 +1131,12 @@
     }
 
     /* ---------- 渲染 ---------- */
+    function renderHeader() {
+      const sync = FB && syncStatus !== 'off' ? `<span class="sync ${syncStatus}">${SYNC_TEXT[syncStatus]}</span>` : '';
+      document.getElementById('hdrAuth').innerHTML = sync + (!HAS_LOGIN ? ''
+        : admin ? `<span class="role">前台</span><button onclick="logout()">退出</button>`
+          : `<span class="role">只读</span><button onclick="openLogin()">前台登录</button>`);
+    }
     function render() {
       const allowed = admin ? ['assign', 'duty', 'log', 'config'] : ['assign'];   // 只读：只有分配页
       if (!ui.tab || !allowed.includes(ui.tab)) ui.tab = (S.started || !admin) ? 'assign' : (S.waiters.length ? 'duty' : 'config');
@@ -1034,9 +1145,7 @@
         if (b.dataset.admin) b.hidden = !admin;
       });
       document.getElementById('nav').hidden = !admin;   // 只读只有一页，不显示页签栏
-      document.getElementById('hdrAuth').innerHTML = !AUTH ? ''
-        : admin ? `<span class="role">前台</span><button onclick="logout()">退出</button>`
-          : `<span class="role">只读</span><button onclick="openLogin()">前台登录</button>`;
+      renderHeader();
       const app = document.getElementById('app');
       app.innerHTML = ({ assign: viewAssign, duty: viewDuty, log: viewLog, config: viewConfig })[ui.tab]();
       document.getElementById('modal').innerHTML = viewModal();
@@ -1113,7 +1222,7 @@
     }
 
     function viewAssign() {
-      if (!S.started) return `<div class="card empty">${admin ? '请先在「今日上岗」勾选服务员并开始营业' : '前台还没有开始营业'}</div>`;
+      if (!S.started) return `<div class="card empty">${admin ? '请先在「今日上岗」勾选服务员并开始营业' : (FB && !syncReady ? '正在连接…' : '前台还没有开始营业')}</div>`;
       const nid = nextWaiter();
       const shared = ui.size > SHARE_THRESHOLD;
       const ready = ui.table && ui.size >= 1;
@@ -1146,7 +1255,7 @@ ${admin ? `  <div class="card">
       分配给 ${esc(wname(nid))}</button></div>
   </div>` : `  <div class="card">
     <h3>餐桌占位情况</h3>
-    <div class="label hint">红色 = 占位中（只读）</div>
+    <div class="label hint">红色 = 占位中（只读）${FB && syncAt ? ' · 数据更新于 ' + fmtTime(syncAt) : ''}</div>
     ${S.tables.length ? layoutGrid(S.tables, t => {
         const o = occupantOf(t.code);
         return o
@@ -1255,7 +1364,7 @@ ${SHIFT_NAME.evening}（${shiftRange('evening')}）：${summary(inShift('evening
     }
     function doUndo() { if (needAdmin()) return; undo(); render(); }
     function doRedo() { if (needAdmin()) return; redo(); render(); }
-    function resetAll() { if (needAdmin()) return; if (confirm('确定清空所有数据？')) { localStorage.removeItem(KEY); S = load(); ui = { tab: 'config' }; render(); } }
+    function resetAll() { if (needAdmin()) return; if (confirm('确定清空所有数据？')) { localStorage.removeItem(KEY); S = load(); ui = { tab: 'config' }; save(); render(); } }
 
     document.getElementById('nav').addEventListener('click', e => {
       if (e.target.dataset.tab) { ui.tab = e.target.dataset.tab; render(); }
@@ -1287,6 +1396,7 @@ ${SHIFT_NAME.evening}（${shiftRange('evening')}）：${summary(inShift('evening
     // 首次使用（浏览器里还没有服务员和餐桌）时自动读取 config.js
     if (!S.waiters.length && !S.tables.length) { applyConfig(); save(); }
     render();
+    initSync();
 
     // PWA：注册 Service Worker（需要 https 或 localhost；直接双击打开本地文件时会自动跳过）
     if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
