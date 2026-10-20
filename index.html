@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <title>Who is Next?</title>
+  <title>Who's Next?</title>
   <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#e8590c">
   <meta name="mobile-web-app-capable" content="yes">
@@ -553,7 +553,7 @@
 </head>
 
 <body>
-  <header>🍽 Who is Next?</header>
+  <header>🍽 Who's Next?</header>
   <nav id="nav">
     <button data-tab="assign">分配</button>
     <button data-tab="duty">今日上岗</button>
@@ -834,8 +834,10 @@
         placed.add(r[c]);
         return hit.name;
       }).join(' ') + "'").join(' ');   // 单引号：这段会放进 style="..." 里，不能用双引号
-      const cells = [...placed].map(code => { const h = byCode.get(code);
-        return `<div class="cell" style="grid-area:${h.name}">${render(h.it)}</div>`; }).join('');
+      const cells = [...placed].map(code => {
+        const h = byCode.get(code);
+        return `<div class="cell" style="grid-area:${h.name}">${render(h.it)}</div>`;
+      }).join('');
       const rest = items.filter(it => !placed.has(it.code));
       return `<div class="tables tgrid" style="display:grid;grid-template-columns:repeat(${cols},minmax(0,1fr));grid-template-areas:${areas};grid-auto-rows:minmax(46px,auto)">${cells}</div>`
         + (rest.length ? `<div class="tables">${rest.map(render).join('')}</div>` : '');
@@ -1023,7 +1025,7 @@
       }) : '<div class="empty">请先到「配置」添加餐桌</div>'}
     <div class="label hint">客人人数</div>
     <div class="quick">${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(n =>
-          `<button data-n="${n}" class="${ui.size === n && !ui.custom ? 'sel' : ''}" onclick="pickSize(${n})">${n}</button>`).join('')}
+        `<button data-n="${n}" class="${ui.size === n && !ui.custom ? 'sel' : ''}" onclick="pickSize(${n})">${n}</button>`).join('')}
       <input class="num" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" placeholder="其他" value="${esc(ui.custom || '')}" oninput="typeSize(this)">
     </div>
     <div class="hint" id="sizeHint" style="color:#1971c2">${shared ? `人数 &gt; ${SHARE_THRESHOLD}：共享桌，只记录桌号，不计人数` : ''}</div>
@@ -1034,25 +1036,25 @@
   <div class="card board">
     <h3>今日服务情况</h3>
     ${S.onDuty.map((id, i) => {
-            const r = S.records[id];
-            return `<div class="w ${id === nid ? 'is-next' : ''}">
+          const r = S.records[id];
+          return `<div class="w ${id === nid ? 'is-next' : ''}">
         <span class="badge">${i + 1}</span>
         <div class="info"><b>${esc(wname(id))}</b> ${id === nid ? '<span class="chip">下一位</span>' : ''}
           <div>${r.items.map(it => `<button class="chip editable ${it.shared ? 'share' : ''} ${it.released ? 'released' : ''}" title="${it.released ? '已释放' : '占位中'}" onclick="openEdit('${it.id}')">${esc(it.table)}${it.shared ? ' 共享·' + it.size + '人(不计)' : '·' + it.size + '人'}</button>`).join('') || '<span class="hint">暂无</span>'}</div>
         </div>
         <div class="cnt">${r.count}<small> 人</small> <span style="color:#555">${r.items.length}</span><small> 桌</small><div class="hint" style="font-size:12px;font-weight:600;color:${activeOf(id) ? '#c92a2a' : '#868e96'}">占位 ${activeOf(id)} 桌</div>${sharedOf(id).length ? `<div class="hint" style="font-size:12px;font-weight:400;color:#1971c2">含共享 ${sharedOf(id).length} 桌</div>` : ''}</div>
       </div>`;
-          }).join('')}
+        }).join('')}
   </div>
 
   <div class="card log">
     <h3>最近记录</h3>
     ${S.history.slice(-8).reverse().map(h => {
-            const f = findItem(h.id); if (!f) return '';
-            return `<div class="recent"><span>${fmtTime(h.time)}
+          const f = findItem(h.id); if (!f) return '';
+          return `<div class="recent"><span>${fmtTime(h.time)}
       ${esc(f.item.table)} → <b>${esc(wname(h.waiterId))}</b> ${f.item.shared ? `共享桌 ${f.item.size}人(不计)` : f.item.size + '人'}</span>
       <button class="mini" style="color:#444" onclick="openEdit('${h.id}')">修改</button></div>`;
-          }).join('')
+        }).join('')
         || '<div class="empty">暂无</div>'}
   </div>`;
     }
