@@ -40,6 +40,10 @@
       font-weight: 600;
     }
 
+    nav[hidden] {
+      display: none;
+    }
+
     nav {
       display: flex;
       background: #fff;
@@ -490,6 +494,57 @@
       align-items: center;
     }
 
+    /* 登录 / 只读 */
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .hdr-auth {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      font-weight: 400;
+    }
+
+    .hdr-auth .role {
+      padding: 2px 8px;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, .25);
+    }
+
+    .hdr-auth button {
+      padding: 5px 10px;
+      border: 1px solid rgba(255, 255, 255, .8);
+      border-radius: 6px;
+      background: transparent;
+      color: #fff;
+      font-size: 13px;
+    }
+
+    .tables button.ro:disabled {
+      opacity: 1;
+      cursor: default;
+      color: #222;
+    }
+
+    .tables button.occ.ro:disabled {
+      color: #c92a2a;
+    }
+
+    .login-err {
+      min-height: 18px;
+      margin-top: 8px;
+      color: #e03131;
+      font-size: 13px;
+    }
+
+    .modal input.full {
+      width: 100%;
+    }
+
     /* 按平面图排列的餐桌 */
     .tgrid .cell {
       display: flex;
@@ -553,12 +608,12 @@
 </head>
 
 <body>
-  <header>🍽 Who's Next?</header>
+  <header><span>🍽 Who's Next?</span><span id="hdrAuth" class="hdr-auth"></span></header>
   <nav id="nav">
     <button data-tab="assign">分配</button>
-    <button data-tab="duty">今日上岗</button>
-    <button data-tab="log">日志</button>
-    <button data-tab="config">配置</button>
+    <button data-tab="duty" data-admin="1">今日上岗</button>
+    <button data-tab="log" data-admin="1">日志</button>
+    <button data-tab="config" data-admin="1">配置</button>
   </nav>
   <main id="app"></main>
   <div id="modal"></div>
@@ -568,6 +623,18 @@
     const CFG = window.WHOSENEXT_CONFIG || {};
     const SHARE_THRESHOLD = Number.isFinite(CFG.shareThreshold) ? CFG.shareThreshold : 5; // 人数 > 阈值 为共享桌
     const KEY = 'whosenext.v1';
+
+    /* ---------- 权限：服务员直接打开 = 只读；前台登录后 = 管理员 ----------
+       账号密码写在 config.js 的 admin 里。注意：这是静态网页，账号密码对能打开网页的人是可见的，
+       只能防误操作，不能防有意的人。没配置 admin 时不需要登录（所有人可操作）。 */
+    const AUTH_KEY = 'whosenext.admin';
+    const AUTH = CFG.admin && CFG.admin.username ? { u: String(CFG.admin.username), p: String(CFG.admin.password || '') } : null;
+    function hashStr(str) { let h = 5381; for (let i = 0; i < str.length; i++) h = ((h * 33) ^ str.charCodeAt(i)) >>> 0; return h.toString(36); }
+    const authSig = () => AUTH ? hashStr(AUTH.u + '\n' + AUTH.p) : '';
+    // 登录状态存在本机；config.js 里改了账号或密码后，旧的登录状态自动失效
+    let admin = !AUTH || localStorage.getItem(AUTH_KEY) === authSig();
+    // 只读状态下点了需要权限的操作：弹出登录窗并拦截
+    function needAdmin() { if (admin) return false; openLogin(); return true; }
 
     let S = load();
 
@@ -582,7 +649,7 @@
         .filter(t => t.code && t.cap >= 1 && !seen.has(t.code) && seen.add(t.code));
       S.onDuty = S.onDuty.filter(id => S.waiters.some(w => w.id === id));
     }
-    function importConfig() {
+    function importConfig() { if (needAdmin()) return;
       if (!window.WHOSENEXT_CONFIG) return alert('没有找到 config.js，请确认它和 index.html 在同一目录');
       if (S.started) return alert('营业中不能导入，请先在「今日上岗」结束今天');
       if (!confirm('用 config.js 覆盖当前的服务员和餐桌列表？')) return;
@@ -686,7 +753,7 @@
     }
     const exportToday = () => download(`排班日志-${fmtDate(Date.now())}.txt`, logToText(fmtDate(Date.now()), S.log));
     const exportArchive = i => { const a = S.logArchive[i]; download(`排班日志-${a.date}.txt`, logToText(a.date, a.entries)); };
-    function delArchive(i) { if (confirm('删除这天的日志？')) { S.logArchive.splice(i, 1); save(); render(); } }
+    function delArchive(i) { if (needAdmin()) return; if (confirm('删除这天的日志？')) { S.logArchive.splice(i, 1); save(); render(); } }
 
     const isShared = size => size > SHARE_THRESHOLD;
     // 人数 = 非共享桌的人数之和（共享桌不计）
@@ -780,9 +847,9 @@
       }
       return null;
     }
-    function openRelease(code) { ui.release = code; render(); }
+    function openRelease(code) { if (needAdmin()) return; ui.release = code; render(); }
     function closeRelease() { ui.release = null; render(); }
-    function doRelease() {
+    function doRelease() { if (needAdmin()) return;
       const code = ui.release, now = Date.now();
       const f = occupantOf(code);
       if (!f) return closeRelease();
@@ -849,7 +916,7 @@
       if (ui.edit && !codes.includes(ui.edit.origTable)) codes.unshift(ui.edit.origTable);
       return codes;
     }
-    function openEdit(id) {
+    function openEdit(id) { if (needAdmin()) return;
       const f = findItem(id);
       if (!f) return;
       ui.edit = { id, table: f.item.table, origTable: f.item.table, size: f.item.size };
@@ -876,7 +943,7 @@
       if (t && e.size > t.cap) return `<span style="color:#e03131">${esc(t.code)} 最多坐 ${t.cap} 人</span>`;
       return `计入服务人数：${e.size} 人`;
     }
-    function saveEdit() {
+    function saveEdit() { if (needAdmin()) return;
       const e = ui.edit, t = S.tables.find(t => t.code === e.table);
       if (!e.size) return;
       if (editConflict(e.table)) return alert(`${e.table} 已被占位，请先释放或选择其他桌`);
@@ -885,12 +952,13 @@
       editEntry(e.id, e.table, e.size);
       closeEdit();
     }
-    function deleteEdit() {
+    function deleteEdit() { if (needAdmin()) return;
       if (!confirm('删除这条分配？该桌人数会从服务员记录中扣除')) return;
       removeEntry(ui.edit.id, '删除');
       closeEdit();
     }
     function viewModal() {
+      if (ui.login) return viewLogin();
       if (ui.release) return viewRelease();
       const e = ui.edit;
       if (!e) return '';
@@ -920,10 +988,55 @@
   </div></div>`;
     }
 
+    /* ---------- 前台登录 ---------- */
+    function openLogin() {
+      ui.login = true; render();
+      setTimeout(() => { const u = document.getElementById('loginUser'); if (u) u.focus(); }, 0);
+    }
+    function closeLogin() { ui.login = null; render(); }
+    function doLogin() {
+      const u = document.getElementById('loginUser').value.trim(), p = document.getElementById('loginPass').value;
+      if (u === AUTH.u && p === AUTH.p) {
+        admin = true; localStorage.setItem(AUTH_KEY, authSig()); ui.login = null;
+        ui.tab = S.started ? 'assign' : (S.waiters.length ? 'duty' : 'config'); render();
+      } else {
+        document.getElementById('loginErr').textContent = '用户名或密码错误';
+        document.getElementById('loginPass').value = '';
+      }
+    }
+    function logout() {
+      admin = false; localStorage.removeItem(AUTH_KEY);
+      ui.edit = ui.release = ui.login = null; ui.table = null; ui.size = null; ui.custom = '';
+      render();
+    }
+    function viewLogin() {
+      return `<div class="mask" onclick="if(event.target===this)closeLogin()"><div class="modal">
+    <h3>前台登录</h3>
+    <div class="hint">服务员无需登录，直接查看即可；前台登录后才能分配、修改、释放和配置。</div>
+    <div class="lbl">用户名</div>
+    <input class="full" id="loginUser" type="text" autocomplete="username" autocapitalize="off" onkeydown="if(event.key==='Enter')document.getElementById('loginPass').focus()">
+    <div class="lbl">密码</div>
+    <input class="full" id="loginPass" type="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()">
+    <div class="login-err" id="loginErr"></div>
+    <div class="actions">
+      <button class="btn gray" onclick="closeLogin()">取消</button>
+      <button class="btn" onclick="doLogin()">登录</button>
+    </div>
+  </div></div>`;
+    }
+
     /* ---------- 渲染 ---------- */
     function render() {
-      if (!ui.tab) ui.tab = S.started ? 'assign' : (S.waiters.length ? 'duty' : 'config');
-      document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('active', b.dataset.tab === ui.tab));
+      const allowed = admin ? ['assign', 'duty', 'log', 'config'] : ['assign'];   // 只读：只有分配页
+      if (!ui.tab || !allowed.includes(ui.tab)) ui.tab = (S.started || !admin) ? 'assign' : (S.waiters.length ? 'duty' : 'config');
+      document.querySelectorAll('#nav button').forEach(b => {
+        b.classList.toggle('active', b.dataset.tab === ui.tab);
+        if (b.dataset.admin) b.hidden = !admin;
+      });
+      document.getElementById('nav').hidden = !admin;   // 只读只有一页，不显示页签栏
+      document.getElementById('hdrAuth').innerHTML = !AUTH ? ''
+        : admin ? `<span class="role">前台</span><button onclick="logout()">退出</button>`
+          : `<span class="role">只读</span><button onclick="openLogin()">前台登录</button>`;
       const app = document.getElementById('app');
       app.innerHTML = ({ assign: viewAssign, duty: viewDuty, log: viewLog, config: viewConfig })[ui.tab]();
       document.getElementById('modal').innerHTML = viewModal();
@@ -995,12 +1108,12 @@
         return `<div class="logline row" style="justify-content:space-between">
       <span>${esc(a.date)} <span class="hint">上午班 ${x.morning.length} 条 · 晚班 ${x.evening.length} 条</span></span>
       <span><button class="mini" style="color:#444" onclick="exportArchive(${i})">导出</button>
-      <button class="mini" onclick="delArchive(${i})">删除</button></span></div>`;
+      ${admin ? `<button class="mini" onclick="delArchive(${i})">删除</button>` : ''}</span></div>`;
       }).join('')}</div>` : ''}`;
     }
 
     function viewAssign() {
-      if (!S.started) return `<div class="card empty">请先在「今日上岗」勾选服务员并开始营业</div>`;
+      if (!S.started) return `<div class="card empty">${admin ? '请先在「今日上岗」勾选服务员并开始营业' : '前台还没有开始营业'}</div>`;
       const nid = nextWaiter();
       const shared = ui.size > SHARE_THRESHOLD;
       const ready = ui.table && ui.size >= 1;
@@ -1011,7 +1124,7 @@
     <div class="label">当前已服务 ${S.records[nid].count} 人 · ${S.records[nid].items.length} 桌 · 占位 ${activeOf(nid)} 桌</div>
   </div>
 
-  <div class="card">
+${admin ? `  <div class="card">
     <h3 class="bar">客人到店 <span class="head-tools">
       ${ibtn('undo', S.undoStack.length ? '撤销：' + S.undoStack[S.undoStack.length - 1].label : '撤销', 'doUndo()', { disabled: !S.undoStack.length })}
       ${ibtn('redo', S.redoStack.length ? '重做：' + S.redoStack[S.redoStack.length - 1].label : '重做', 'doRedo()', { disabled: !S.redoStack.length })}
@@ -1031,7 +1144,16 @@
     <div class="hint" id="sizeHint" style="color:#1971c2">${shared ? `人数 &gt; ${SHARE_THRESHOLD}：共享桌，只记录桌号，不计人数` : ''}</div>
     <div style="margin-top:12px"><button class="btn" id="assignBtn" style="width:100%" ${ready ? '' : 'disabled'} onclick="doAssign()">
       分配给 ${esc(wname(nid))}</button></div>
-  </div>
+  </div>` : `  <div class="card">
+    <h3>餐桌占位情况</h3>
+    <div class="label hint">红色 = 占位中（只读）</div>
+    ${S.tables.length ? layoutGrid(S.tables, t => {
+        const o = occupantOf(t.code);
+        return o
+          ? `<button class="occ ro" disabled>${esc(t.code)} <small>占位·${esc(wname(o.waiterId))}·${o.item.size}人</small></button>`
+          : `<button class="ro" disabled>${esc(t.code)} <small>/${t.cap}人</small></button>`;
+      }) : '<div class="empty">暂无餐桌</div>'}
+  </div>`}
 
   <div class="card board">
     <h3>今日服务情况</h3>
@@ -1040,7 +1162,7 @@
           return `<div class="w ${id === nid ? 'is-next' : ''}">
         <span class="badge">${i + 1}</span>
         <div class="info"><b>${esc(wname(id))}</b> ${id === nid ? '<span class="chip">下一位</span>' : ''}
-          <div>${r.items.map(it => `<button class="chip editable ${it.shared ? 'share' : ''} ${it.released ? 'released' : ''}" title="${it.released ? '已释放' : '占位中'}" onclick="openEdit('${it.id}')">${esc(it.table)}${it.shared ? ' 共享·' + it.size + '人(不计)' : '·' + it.size + '人'}</button>`).join('') || '<span class="hint">暂无</span>'}</div>
+          <div>${r.items.map(it => `<${admin ? 'button' : 'span'} class="chip ${admin ? 'editable' : ''} ${it.shared ? 'share' : ''} ${it.released ? 'released' : ''}" title="${it.released ? '已释放' : '占位中'}" ${admin ? `onclick="openEdit('${it.id}')"` : ''}>${esc(it.table)}${it.shared ? ' 共享·' + it.size + '人(不计)' : '·' + it.size + '人'}</${admin ? 'button' : 'span'}>`).join('') || '<span class="hint">暂无</span>'}</div>
         </div>
         <div class="cnt">${r.count}<small> 人</small> <span style="color:#555">${r.items.length}</span><small> 桌</small><div class="hint" style="font-size:12px;font-weight:600;color:${activeOf(id) ? '#c92a2a' : '#868e96'}">占位 ${activeOf(id)} 桌</div>${sharedOf(id).length ? `<div class="hint" style="font-size:12px;font-weight:400;color:#1971c2">含共享 ${sharedOf(id).length} 桌</div>` : ''}</div>
       </div>`;
@@ -1053,27 +1175,27 @@
           const f = findItem(h.id); if (!f) return '';
           return `<div class="recent"><span>${fmtTime(h.time)}
       ${esc(f.item.table)} → <b>${esc(wname(h.waiterId))}</b> ${f.item.shared ? `共享桌 ${f.item.size}人(不计)` : f.item.size + '人'}</span>
-      <button class="mini" style="color:#444" onclick="openEdit('${h.id}')">修改</button></div>`;
+      ${admin ? `<button class="mini" style="color:#444" onclick="openEdit('${h.id}')">修改</button>` : ''}</div>`;
         }).join('')
         || '<div class="empty">暂无</div>'}
   </div>`;
     }
 
     /* ---------- 操作 ---------- */
-    function addWaiter() {
+    function addWaiter() { if (needAdmin()) return;
       const el = document.getElementById('wName'); const name = el.value.trim();
       if (!name) return;
       if (S.waiters.some(w => w.name === name)) return alert('名字已存在');
       S.waiters.push({ id: uid(), name }); save(); render();
       document.getElementById('wName').focus();
     }
-    function delWaiter(id) {
+    function delWaiter(id) { if (needAdmin()) return;
       if (S.started && S.onDuty.includes(id)) return alert('该服务员今日在岗，请先结束今天再删除');
       S.waiters = S.waiters.filter(w => w.id !== id);
       S.onDuty = S.onDuty.filter(x => x !== id);
       save(); render();
     }
-    function addTable() {
+    function addTable() { if (needAdmin()) return;
       const code = document.getElementById('tCode').value.trim();
       const cap = parseInt(document.getElementById('tCap').value, 10);
       if (!code || !(cap >= 1)) return alert('请输入桌号和最多可坐人数');
@@ -1081,21 +1203,21 @@
       S.tables.push({ code, cap }); save(); render();
       document.getElementById('tCode').focus();
     }
-    function delTable(code) { S.tables = S.tables.filter(t => t.code !== code); save(); render(); }
+    function delTable(code) { if (needAdmin()) return; S.tables = S.tables.filter(t => t.code !== code); save(); render(); }
 
-    function toggleDuty(id) {
+    function toggleDuty(id) { if (needAdmin()) return;
       const i = S.onDuty.indexOf(id);
       if (i >= 0) S.onDuty.splice(i, 1); else S.onDuty.push(id);
       save(); render();
     }
-    function startDay() {
+    function startDay() { if (needAdmin()) return;
       S.records = {}; S.history = []; S.log = []; S.undoStack = []; S.redoStack = [];
       S.onDuty.forEach(id => S.records[id] = { count: 0, items: [] });
       S.started = true;
       addLog('start', `开始营业，上岗顺序：${S.onDuty.map((id, i) => `${i + 1}.${wname(id)}`).join(' ')}；下一位：${wname(nextWaiter())}`);
       save(); ui.tab = 'assign'; render();
     }
-    function endDay() {
+    function endDay() { if (needAdmin()) return;
       if (!confirm('结束今天？当天记录将清空')) return;
       const inShift = k => it => shiftOf(it.t) === k;
       addLog('end', `结束营业。
@@ -1123,7 +1245,7 @@ ${SHIFT_NAME.evening}（${shiftRange('evening')}）：${summary(inShift('evening
       document.getElementById('sizeHint').innerHTML = shared ? `人数 &gt; ${SHARE_THRESHOLD}：共享桌，只记录桌号，不计人数` : '';
       document.getElementById('assignBtn').disabled = !(ui.table && ui.size >= 1);
     }
-    function doAssign() {
+    function doAssign() { if (needAdmin()) return;
       if (occupantOf(ui.table)) { ui.table = null; render(); return alert('该桌已被占位，请先释放'); }
       const t = S.tables.find(t => t.code === ui.table);
       if (t && ui.size > t.cap && ui.size <= SHARE_THRESHOLD &&
@@ -1131,9 +1253,9 @@ ${SHIFT_NAME.evening}（${shiftRange('evening')}）：${summary(inShift('evening
       assign(ui.table, ui.size);
       ui.table = null; ui.size = null; ui.custom = ''; render();
     }
-    function doUndo() { undo(); render(); }
-    function doRedo() { redo(); render(); }
-    function resetAll() { if (confirm('确定清空所有数据？')) { localStorage.removeItem(KEY); S = load(); ui = { tab: 'config' }; render(); } }
+    function doUndo() { if (needAdmin()) return; undo(); render(); }
+    function doRedo() { if (needAdmin()) return; redo(); render(); }
+    function resetAll() { if (needAdmin()) return; if (confirm('确定清空所有数据？')) { localStorage.removeItem(KEY); S = load(); ui = { tab: 'config' }; render(); } }
 
     document.getElementById('nav').addEventListener('click', e => {
       if (e.target.dataset.tab) { ui.tab = e.target.dataset.tab; render(); }
@@ -1156,9 +1278,9 @@ ${SHIFT_NAME.evening}（${shiftRange('evening')}）：${summary(inShift('evening
       recount();
     })();
     document.addEventListener('keydown', e => {
-      if (e.key === 'Escape') { if (ui.release) closeRelease(); else if (ui.edit) closeEdit(); return; }
+      if (e.key === 'Escape') { if (ui.release) closeRelease(); else if (ui.edit) closeEdit(); else if (ui.login) closeLogin(); return; }
       // Ctrl/Cmd+Z 撤销，Ctrl/Cmd+Shift+Z 重做（在输入框里时不拦截）
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z' && S.started && !/INPUT|TEXTAREA/.test((document.activeElement || {}).tagName || '')) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z' && admin && S.started && !/INPUT|TEXTAREA/.test((document.activeElement || {}).tagName || '')) {
         e.preventDefault(); e.shiftKey ? doRedo() : doUndo();
       }
     });
