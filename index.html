@@ -497,6 +497,8 @@
     /* 登录 / 只读 */
     header {
       display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
       justify-content: space-between;
       align-items: center;
     }
@@ -529,7 +531,8 @@
       opacity: .95;
     }
 
-    .sync.error {
+    .sync.error,
+    .sync.denied {
       font-weight: 700;
     }
 
@@ -1054,10 +1057,11 @@
         if (st !== lastStateJson) { await set(ref(fb.db, SYNC_PATH + '/state'), { v: st, t: Date.now(), by: CLIENT_ID }); lastStateJson = st; }
         if (ar !== lastArchiveJson) { await set(ref(fb.db, SYNC_PATH + '/archive'), { v: ar, t: Date.now(), by: CLIENT_ID }); lastArchiveJson = ar; }
         if (JSON.stringify(sharedState()) === st) localStorage.removeItem(DIRTY_KEY);   // 期间没有新改动才算同步完
-        if (syncStatus === 'error') { syncStatus = 'online'; renderHeader(); }
+        if (syncStatus === 'error' || syncStatus === 'denied') { syncStatus = 'online'; renderHeader(); }
       } catch (e) {
         console.warn('同步失败', e);
-        syncStatus = 'error'; renderHeader();
+        // PERMISSION_DENIED：已登录，但这个账号的邮箱不在 Firebase 规则的写入名单里
+        syncStatus = /PERMISSION_DENIED/i.test(e.code || e.message || '') ? 'denied' : 'error'; renderHeader();
       }
     }
 
@@ -1111,7 +1115,8 @@
         render();
       });
     }
-    const SYNC_TEXT = { connecting: '连接中…', online: '● 已同步', offline: '○ 离线（恢复后自动同步）', error: '⚠ 同步失败', unavailable: '⚠ 无法连接同步服务' };
+    const SYNC_TEXT = {
+      get denied() { const u = fb && fb.auth.currentUser; return `⚠ 无写入权限${u && u.email ? '：' + u.email : ''}（请把该邮箱加入 Firebase 规则）`; }, connecting: '连接中…', online: '● 已同步', offline: '○ 离线（恢复后自动同步）', error: '⚠ 同步失败', unavailable: '⚠ 无法连接同步服务' };
 
     /* ---------- 前台登录 ---------- */
     function openLogin() {
