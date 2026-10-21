@@ -507,6 +507,8 @@
       display: flex;
       align-items: center;
       gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
       font-size: 13px;
       font-weight: 400;
     }
@@ -519,6 +521,7 @@
 
     .hdr-auth button {
       padding: 5px 10px;
+      white-space: nowrap;
       border: 1px solid rgba(255, 255, 255, .8);
       border-radius: 6px;
       background: transparent;
@@ -1391,8 +1394,8 @@
       const sync = FB && syncStatus !== 'off' ? `<span class="sync ${syncStatus}">${SYNC_TEXT[syncStatus]}</span>` : '';
       document.getElementById('hdrAuth').innerHTML = sync + (!HAS_LOGIN ? ''
         : admin ? `<span class="role">前台</span><button onclick="logout()">退出</button>`
-          : (FB && meWaiter() ? `<button class="me" onclick="openPick()" title="更换服务员">👤 ${esc(me)}</button>`
-            : FB && authReady ? `<button class="me" onclick="openPick()">选择身份</button>` : `<span class="role">只读</span>`)
+          : (FB && meWaiter() ? `<span class="role">${esc(me)}</span><button onclick="openPick()">切换服务员</button>`
+            : FB && authReady ? `<button onclick="openPick()">选择服务员</button>` : `<span class="role">只读</span>`)
           + `<button onclick="openLogin()">前台登录</button>`);
     }
     function render() {
