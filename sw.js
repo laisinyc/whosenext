@@ -27,3 +27,12 @@ self.addEventListener('fetch', e => {
       .catch(() => caches.match(e.request, { ignoreSearch: true }).then(r => r || caches.match('./index.html')))
   );
 });
+
+// 点击系统通知：回到已打开的页面，没有就打开
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
+    const c = list.find(w => 'focus' in w);
+    return c ? c.focus() : self.clients.openWindow('./');
+  }));
+});
