@@ -526,6 +526,97 @@
       font-size: 13px;
     }
 
+    .hdr-auth button.me {
+      font-weight: 600;
+    }
+
+    .pick {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .pick button {
+      padding: 14px 8px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+      font-size: 17px;
+      font-weight: 600;
+    }
+
+    .pick button.sel {
+      border-color: var(--primary, #e8590c);
+      background: #fff4e6;
+    }
+
+    .modal.alert {
+      border-top: 6px solid #e8590c;
+    }
+
+    .modal.alert .al {
+      display: flex;
+      align-items: baseline;
+      gap: 12px;
+      margin-top: 12px;
+      padding: 12px;
+      border-radius: 10px;
+      background: #fff4e6;
+    }
+
+    .modal.alert .al.share {
+      background: #e7f5ff;
+    }
+
+    .modal.alert .al b {
+      font-size: 34px;
+      line-height: 1;
+    }
+
+    .modal.alert .al span {
+      flex: 1;
+      font-size: 20px;
+      font-weight: 600;
+    }
+
+    .modal.alert .al small {
+      font-size: 12px;
+      font-weight: 400;
+      color: var(--mute);
+    }
+
+    .modal.alert .al em {
+      font-style: normal;
+      font-size: 13px;
+      color: var(--mute);
+    }
+
+    .modal.alert .hint {
+      margin-top: 12px;
+    }
+
+    .card.mine {
+      border: 2px solid #e8590c;
+    }
+
+    .card.mine .big {
+      font-size: 32px;
+      font-weight: 800;
+      margin: 2px 0 4px;
+    }
+
+    .card.mine .big span {
+      font-size: 20px;
+      font-weight: 600;
+    }
+
+    .card.mine .big small {
+      font-size: 13px;
+      font-weight: 400;
+      color: var(--mute);
+    }
+
     .logo-card {
       text-align: center;
       padding: 40px 16px;
@@ -707,7 +798,7 @@
       if (!confirm('用 config.js 覆盖当前的服务员和餐桌列表？')) return;
       applyConfig(); save(); render();
     }
-    let ui = { tab: null, table: null, size: null, custom: '', edit: null, release: null };
+    let ui = { tab: null, table: null, size: null, custom: '', edit: null, release: null, pick: false, alert: null };
 
     function load() {
       try {
@@ -1011,6 +1102,8 @@
     }
     function viewModal() {
       if (ui.login) return viewLogin();
+      if (needPick()) return viewPick();
+      if (ui.alert && !admin) return viewAlert();
       if (ui.release) return viewRelease();
       const e = ui.edit;
       if (!e) return '';
@@ -1038,6 +1131,93 @@
       <button class="btn" id="editSave" ${e.size ? '' : 'disabled'} onclick="saveEdit()">保存</button>
     </div>
   </div></div>`;
+    }
+
+    /* ---------- 服务员身份与新分配提醒 ----------
+       服务员（只读）第一次打开网址时选择自己的名字，记在本机；之后前台给 TA 分配新桌（或修改桌号/人数）时，
+       页面会弹出提醒（并震动 / 提示音；页面在后台且已允许通知时还有系统通知）。
+       已提醒过的条目记在本机（SEEN_KEY），所以服务员离开期间错过的分配，重新打开时也会补提醒一次。 */
+    const ME_KEY = 'whosenext.me', SEEN_KEY = 'whosenext.seen';
+    let me = localStorage.getItem(ME_KEY) || '';          // 服务员名字；'-' = 前台设备 / 选择跳过
+    let authReady = false;                                 // Firebase 已经告知登录状态（避免前台刷新时闪一下选人窗口）
+    const meWaiter = () => S.waiters.find(w => w.name === me);
+    const needPick = () => !admin && FB && (ui.pick || (authReady && syncReady && me !== '-' && !meWaiter() && S.waiters.length > 0));
+    const itemSig = it => it.table + '|' + it.size;
+    function loadSeen() { try { return JSON.parse(localStorage.getItem(SEEN_KEY)) || {}; } catch (e) { return {}; } }
+
+    function askNotify() {
+      try { if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission().then(() => render()); } catch (e) { }
+    }
+    function setMe(name) {
+      me = name; localStorage.setItem(ME_KEY, me); ui.pick = false; ui.alert = null;
+      checkAlerts(true);                                   // 选名字之前已有的分配不算新分配
+      if (name !== '-') askNotify();
+      render();
+    }
+    function openPick() { ui.pick = true; render(); }
+    function closePick() { ui.pick = false; render(); }
+
+    // 对比「我」的分配与本机已提醒过的记录，有新增或修改的就提醒。silent = 只记录不提醒
+    function checkAlerts(silent) {
+      const w = meWaiter();
+      if (admin || !w) return;
+      const items = (S.records[w.id] || { items: [] }).items;
+      const all = loadSeen(), seen = all[me] || {}, next = {}, fresh = [];
+      items.forEach(it => {
+        const s = itemSig(it); next[it.id] = s;
+        if (!silent && !it.released && seen[it.id] !== s) fresh.push({ table: it.table, size: it.size, shared: it.shared, t: it.t, upd: seen[it.id] !== undefined });
+      });
+      all[me] = next; localStorage.setItem(SEEN_KEY, JSON.stringify(all));
+      if (fresh.length) pushAlert(fresh, w);
+    }
+    const alertLine = a => `${a.table} · ${a.shared ? '共享桌 ' + a.size + ' 人（不计人数）' : a.size + ' 人'}${a.upd ? '（已修改）' : ''}`;
+    function pushAlert(fresh, w) {
+      ui.alert = { list: [...((ui.alert && ui.alert.list) || []), ...fresh] };
+      const r = S.records[w.id], text = fresh.map(alertLine).join('；');
+      try { navigator.vibrate && navigator.vibrate([200, 100, 200]); } catch (e) { }
+      try {
+        const C = window.AudioContext || window.webkitAudioContext, a = new C(), o = a.createOscillator(), g = a.createGain();
+        o.connect(g); g.connect(a.destination); o.frequency.value = 880; g.gain.value = .2; o.start(); o.stop(a.currentTime + .3);
+      } catch (e) { }
+      try {                                                // 页面在后台时，用系统通知（需要用户已允许）
+        if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
+          const title = `${w.name}：新分配`, opts = { body: `${text}（累计 ${r.count} 人 · ${r.items.length} 桌）`, tag: 'whosenext-assign', renotify: true, vibrate: [200, 100, 200], icon: 'icons/icon-192.png' };
+          if (navigator.serviceWorker) navigator.serviceWorker.ready.then(reg => reg.showNotification(title, opts)).catch(() => new Notification(title, opts));
+          else new Notification(title, opts);
+        }
+      } catch (e) { }
+    }
+    function ackAlert() { ui.alert = null; render(); }
+
+    function viewPick() {
+      return `<div class="mask"><div class="modal">
+    <h3>你是哪位服务员？</h3>
+    <div class="hint">选择后，前台给你分配新桌时会提醒你。选择记在这台手机上，之后可点右上角名字更换。</div>
+    <div class="pick">${S.waiters.map(w => `<button class="${w.name === me ? 'sel' : ''}" onclick="setMe(${esc(JSON.stringify(w.name)).replace(/'/g, '&#39;')})">${esc(w.name)}</button>`).join('')}</div>
+    <div class="actions">${meWaiter() ? `<button class="btn gray" onclick="closePick()">取消</button>` : ''}
+      <button class="btn gray" onclick="setMe('-')">我是前台 / 暂不选择</button></div>
+  </div></div>`;
+    }
+    function viewAlert() {
+      const w = meWaiter(), r = w && S.records[w.id], list = ui.alert.list;
+      return `<div class="mask"><div class="modal alert">
+    <h3>🔔 ${esc(w ? w.name : '')}，你有新分配</h3>
+    ${list.map(a => `<div class="al ${a.shared ? 'share' : ''}"><b>${esc(a.table)}</b><span>${a.shared ? '共享桌 ' + a.size + ' 人<small>（不计人数）</small>' : a.size + ' 人'}${a.upd ? '<small>（已修改）</small>' : ''}</span><em>${fmtTime(a.t)}</em></div>`).join('')}
+    ${r ? `<div class="hint">你目前累计：${r.count} 人 · ${r.items.length} 桌 · 占位 ${activeOf(w.id)} 桌</div>` : ''}
+    <div class="actions"><button class="btn" onclick="ackAlert()">我知道了</button></div>
+  </div></div>`;
+    }
+    // 「我」的最新分配（分配页顶部）
+    function myCard() {
+      const w = meWaiter(); if (admin || !w || !S.started || !S.records[w.id]) return '';
+      const r = S.records[w.id], last = r.items[r.items.length - 1];
+      const notif = 'Notification' in window && Notification.permission === 'default'
+        ? `<button class="mini" style="margin-top:8px" onclick="askNotify()">开启系统通知</button>` : '';
+      return `<div class="card mine">
+    <div class="label">我的最新分配 · ${esc(w.name)}</div>
+    <div class="big">${last ? `${esc(last.table)} <span>${last.shared ? '共享桌 ' + last.size + ' 人(不计)' : last.size + ' 人'}</span> <small>${fmtTime(last.t)}${last.released ? ' · 已释放' : ''}</small>` : '<span class="hint">还没有分配</span>'}</div>
+    <div class="hint">累计 ${r.count} 人 · ${r.items.length} 桌 · 占位 ${activeOf(w.id)} 桌</div>${notif}
+  </div>`;
     }
 
     /* ---------- 多设备同步（Firebase Realtime Database） ----------
@@ -1092,6 +1272,7 @@
       recount();
       lastStateJson = val.v;
       localStorage.setItem(KEY, JSON.stringify(S));      // 存本机，断网时还能看到最后的数据
+      checkAlerts();                                     // 服务员：有新分配就提醒
       render();
     }
     function onRemoteArchive(val) {
@@ -1118,7 +1299,8 @@
       onValue(ref(fb.db, SYNC_PATH + '/state'), snap => onRemoteState(snap.val()), err => { console.warn(err); syncStatus = 'error'; renderHeader(); });
       fb.A.onAuthStateChanged(fb.auth, user => {
         if (user && !isAllowed(user)) { fb.A.signOut(fb.auth).catch(() => { }); user = null; }   // 不在允许名单里：当作未登录
-        admin = !!user;
+        admin = !!user; authReady = true;
+        if (admin && !me) { me = '-'; localStorage.setItem(ME_KEY, me); }   // 前台设备不需要选服务员
         if (admin) {
           if (!unsubArchive) unsubArchive = onValue(ref(fb.db, SYNC_PATH + '/archive'), snap => onRemoteArchive(snap.val()), () => { });
           if (isDirty() || remoteEmpty) schedulePush();
@@ -1183,7 +1365,7 @@
     function logout() {
       admin = false; localStorage.removeItem(AUTH_KEY);
       if (FB && fb) fb.A.signOut(fb.auth).catch(() => { });
-      ui.edit = ui.release = ui.login = null; ui.table = null; ui.size = null; ui.custom = '';
+      ui.edit = ui.release = ui.login = ui.alert = null; ui.table = null; ui.size = null; ui.custom = '';
       render();
     }
     function viewLogin() {
@@ -1209,7 +1391,9 @@
       const sync = FB && syncStatus !== 'off' ? `<span class="sync ${syncStatus}">${SYNC_TEXT[syncStatus]}</span>` : '';
       document.getElementById('hdrAuth').innerHTML = sync + (!HAS_LOGIN ? ''
         : admin ? `<span class="role">前台</span><button onclick="logout()">退出</button>`
-          : `<span class="role">只读</span><button onclick="openLogin()">前台登录</button>`);
+          : (FB && meWaiter() ? `<button class="me" onclick="openPick()" title="更换服务员">👤 ${esc(me)}</button>`
+            : FB && authReady ? `<button class="me" onclick="openPick()">选择身份</button>` : `<span class="role">只读</span>`)
+          + `<button onclick="openLogin()">前台登录</button>`);
     }
     function render() {
       const allowed = admin ? ['assign', 'duty', 'log', 'config'] : ['assign'];   // 只读：只有分配页
@@ -1306,6 +1490,7 @@
       const shared = ui.size > SHARE_THRESHOLD;
       const ready = ui.table && ui.size >= 1;
       return `
+  ${myCard()}
   <div class="card next">
     <div class="label">下一位服务员</div>
     <div class="name">${esc(wname(nid))}</div>
