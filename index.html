@@ -1158,7 +1158,10 @@
       render();
     }
     function openPick() { ui.pick = true; render(); }
-    function closePick() { ui.pick = false; render(); }
+    function closePick() {                                 // 取消：已有身份就保持不变；还没选过就记为“暂不选择”，不再自动弹出
+      if (!meWaiter() && me !== '-') { me = '-'; localStorage.setItem(ME_KEY, me); }
+      ui.pick = false; render();
+    }
 
     // 对比「我」的分配与本机已提醒过的记录，有新增或修改的就提醒。silent = 只记录不提醒
     function checkAlerts(silent) {
@@ -1194,11 +1197,10 @@
 
     function viewPick() {
       return `<div class="mask"><div class="modal">
-    <h3>你是哪位服务员？</h3>
+    <h3>请选择</h3>
     <div class="hint">选择后，前台给你分配新桌时会提醒你。选择记在这台手机上，之后可点右上角名字更换。</div>
     <div class="pick">${S.waiters.map(w => `<button class="${w.name === me ? 'sel' : ''}" onclick="setMe(${esc(JSON.stringify(w.name)).replace(/'/g, '&#39;')})">${esc(w.name)}</button>`).join('')}</div>
-    <div class="actions">${meWaiter() ? `<button class="btn gray" onclick="closePick()">取消</button>` : ''}
-      <button class="btn gray" onclick="setMe('-')">我是前台 / 暂不选择</button></div>
+    <div class="actions"><button class="btn gray" onclick="closePick()">取消</button></div>
   </div></div>`;
     }
     function viewAlert() {
