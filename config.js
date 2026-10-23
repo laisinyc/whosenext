@@ -77,7 +77,7 @@ window.WHOSENEXT_CONFIG = {
   },
 
   // 共享桌阈值：客人人数 大于 该值 时为共享桌（只记桌号，不计人数）
-  shareThreshold: 5,
+  shareThreshold: 7,
 
   // 晚班开始时间（24 小时制 "时:分"）。当天记录按时间自动分成 上午班 / 晚班 两部分
   eveningStart: "16:30",
