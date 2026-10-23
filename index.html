@@ -599,6 +599,19 @@
       margin-top: 12px;
     }
 
+    label.manual {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 10px;
+      font-size: 14px;
+    }
+
+    label.manual input {
+      width: 18px;
+      height: 18px;
+    }
+
     .card.mine {
       border: 2px solid #e8590c;
     }
@@ -801,7 +814,7 @@
       if (!confirm('用 config.js 覆盖当前的服务员和餐桌列表？')) return;
       applyConfig(); save(); render();
     }
-    let ui = { tab: null, table: null, size: null, custom: '', edit: null, release: null, pick: false, alert: null };
+    let ui = { tab: null, table: null, size: null, custom: '', manual: false, edit: null, release: null, pick: false, alert: null };
 
     function load() {
       try {
@@ -881,7 +894,7 @@
         const normal = items.filter(it => !it.shared);
         const n = normal.reduce((a, it) => a + it.size, 0);
         const tb = normal.map(it => `${it.table}(${it.size}人)`).join('、') || '无';
-        const sh = items.filter(it => it.shared).map(it => `${it.table}(${it.size}人)`).join('、');
+        const sh = items.filter(it => it.shared).map(it => `${it.table}(${it.size}人${it.manual ? '，手动' : ''})`).join('、');
         return `${i + 1}.${wname(id)} 共${n}人，${items.length}桌，桌号：${tb}` + (sh ? `；共享桌(不计人数)：${sh}` : '');
       }).join('；');
     }
@@ -902,6 +915,9 @@
     function delArchive(i) { if (needAdmin()) return; if (confirm('删除这天的日志？')) { S.logArchive.splice(i, 1); save(); render(); } }
 
     const isShared = size => size > SHARE_THRESHOLD;
+    // 共享桌 = 人数 > 阈值，或前台手动勾选了「设为共享桌」（manual，无论人数）
+    const calcShared = (size, manual) => !!manual || isShared(size);
+    const shareLabel = it => it.manual ? '手动共享桌' : '共享桌';
     // 人数 = 非共享桌的人数之和（共享桌不计）
     function recount() {
       for (const id in S.records) {
@@ -916,7 +932,7 @@
       }
       return null;
     }
-    const descItem = it => it.shared ? `${it.table} 共享桌(${it.size}人，不计人数)` : `${it.table} ${it.size}人`;
+    const descItem = it => it.shared ? `${it.table} ${shareLabel(it)}(${it.size}人，${it.manual ? '前台手动设置，' : ''}不计人数)` : `${it.table} ${it.size}人`;
 
     /* ---------- 撤销 / 重做 ----------
        每次改动（分配、修改、删除、释放占位）前先存一份快照；撤销/重做在快照间切换，
@@ -946,12 +962,13 @@
       save();
     }
 
-    function assign(table, size) {
+    function assign(table, size, manual) {
       const id = nextWaiter();
       if (!id) return;
       pushUndo(`分配 ${table} ${size}人 → ${wname(id)}`);
       const r = S.records[id], before = r.count;
-      const item = { id: uid(), table, size, shared: isShared(size), t: Date.now() };
+      const item = { id: uid(), table, size, shared: calcShared(size, manual), t: Date.now() };
+      if (manual) item.manual = true;
       r.items.push(item);
       S.history.push({ id: item.id, waiterId: id, time: Date.now() });
       recount();
@@ -973,12 +990,13 @@
     }
 
     // 客人换桌 / 临时加减人：服务员不变，重新计算人数（可能跨过共享桌阈值）
-    function editEntry(id, table, size) {
+    function editEntry(id, table, size, manual) {
       const f = findItem(id);
       if (!f) return;
       const before = f.r.count, old = descItem(f.item);
       pushUndo(`修改 ${wname(f.waiterId)} 的 ${old}`);
-      f.item.table = table; f.item.size = size; f.item.shared = isShared(size);
+      f.item.table = table; f.item.size = size; f.item.shared = calcShared(size, manual);
+      if (manual) f.item.manual = true; else delete f.item.manual;
       recount();
       addLog('edit', `修改：${wname(f.waiterId)} 的 ${old} → ${descItem(f.item)}（${before} → ${f.r.count} 人）；下一位：${wname(nextWaiter())}`, true);
       save();
@@ -1003,7 +1021,7 @@
       for (const wid in S.records) {
         S.records[wid].items.forEach(it => { if (it.table === code && !it.released) it.released = now; });
       }
-      addLog('release', `释放占位：${code}（${wname(f.waiterId)}，${f.item.shared ? '共享桌 ' : ''}${f.item.size}人，入座 ${fmtTime(f.item.t)}）`, true);
+      addLog('release', `释放占位：${code}（${wname(f.waiterId)}，${f.item.shared ? shareLabel(f.item) + ' ' : ''}${f.item.size}人，入座 ${fmtTime(f.item.t)}）`, true);
       save();
       closeRelease();
     }
@@ -1020,7 +1038,7 @@
     <h3>释放占位 · ${esc(code)}</h3>
     <div class="hint">服务员：<b>${esc(wname(f.waiterId))}</b></div>
     <div class="lbl">入座信息</div>
-    <div>${it.shared ? `共享桌 ${it.size} 人（不计人数）` : `${it.size} 人`} · 入座 ${fmtTime(it.t)}</div>
+    <div>${it.shared ? `${shareLabel(it)} ${it.size} 人（不计人数）` : `${it.size} 人`} · 入座 ${fmtTime(it.t)}</div>
     <div class="hint" style="margin-top:10px">释放后该桌可重新分配；已记录的服务人数和桌数不会改变。</div>
     <div class="actions">
       <button class="btn gray" onclick="closeRelease()">取消</button>
@@ -1065,7 +1083,7 @@
     function openEdit(id) { if (needAdmin()) return;
       const f = findItem(id);
       if (!f) return;
-      ui.edit = { id, table: f.item.table, origTable: f.item.table, size: f.item.size };
+      ui.edit = { id, table: f.item.table, origTable: f.item.table, size: f.item.size, manual: !!f.item.manual };
       render();
     }
     function closeEdit() { ui.edit = null; render(); }
@@ -1075,6 +1093,7 @@
       return f && !f.item.released && occupantOf(c, ui.edit.id);
     }
     function editPick(i) { const c = editCodes()[i]; if (editConflict(c)) return; ui.edit.table = c; render(); }
+    function editManual(on) { ui.edit.manual = on; render(); }
     function editStep(d) { ui.edit.size = Math.max(1, (ui.edit.size || 0) + d); render(); }
     function editTyping(v) {            // 打字时不整页重绘，避免丢焦点
       const n = parseInt(v, 10);
@@ -1085,6 +1104,7 @@
     function editHint() {
       const e = ui.edit, t = S.tables.find(t => t.code === e.table);
       if (!e.size) return '请输入人数';
+      if (e.manual) return `<span style="color:#1971c2">已手动设为共享桌：只记桌号，不计人数</span>`;
       if (isShared(e.size)) return `<span style="color:#1971c2">人数 &gt; ${SHARE_THRESHOLD}：按共享桌处理，只记桌号，不计人数</span>`;
       if (t && e.size > t.cap) return `<span style="color:#e03131">${esc(t.code)} 最多坐 ${t.cap} 人</span>`;
       return `计入服务人数：${e.size} 人`;
@@ -1093,9 +1113,9 @@
       const e = ui.edit, t = S.tables.find(t => t.code === e.table);
       if (!e.size) return;
       if (editConflict(e.table)) return alert(`${e.table} 已被占位，请先释放或选择其他桌`);
-      if (t && !isShared(e.size) && e.size > t.cap &&
+      if (t && !calcShared(e.size, e.manual) && e.size > t.cap &&
         !confirm(`${t.code} 最多坐 ${t.cap} 人，当前 ${e.size} 人，仍要保存吗？`)) return;
-      editEntry(e.id, e.table, e.size);
+      editEntry(e.id, e.table, e.size, e.manual);
       closeEdit();
     }
     function deleteEdit() { if (needAdmin()) return;
@@ -1127,6 +1147,7 @@
       <input type="number" min="1" value="${e.size || ''}" oninput="editTyping(this.value)">
       <button onclick="editStep(1)">+</button>
     </div>
+    <label class="manual"><input type="checkbox" ${e.manual ? 'checked' : ''} onchange="editManual(this.checked)"> 设为共享桌（无论人数，只记桌号，不计人数）</label>
     <div class="hint" id="editHint" style="margin-top:8px">${editHint()}</div>
     <div class="actions">
       <button class="btn red" onclick="deleteEdit()" style="flex:0 0 auto">删除</button>
@@ -1145,7 +1166,7 @@
     let authReady = false;                                 // Firebase 已经告知登录状态（避免前台刷新时闪一下选人窗口）
     const meWaiter = () => S.waiters.find(w => w.name === me);
     const needPick = () => !admin && FB && (ui.pick || (authReady && syncReady && me !== '-' && !meWaiter() && S.waiters.length > 0));
-    const itemSig = it => it.table + '|' + it.size;
+    const itemSig = it => it.table + '|' + it.size + (it.manual ? '|m' : '');
     function loadSeen() { try { return JSON.parse(localStorage.getItem(SEEN_KEY)) || {}; } catch (e) { return {}; } }
 
     function askNotify() {
@@ -1171,12 +1192,12 @@
       const all = loadSeen(), seen = all[me] || {}, next = {}, fresh = [];
       items.forEach(it => {
         const s = itemSig(it); next[it.id] = s;
-        if (!silent && !it.released && seen[it.id] !== s) fresh.push({ table: it.table, size: it.size, shared: it.shared, t: it.t, upd: seen[it.id] !== undefined });
+        if (!silent && !it.released && seen[it.id] !== s) fresh.push({ table: it.table, size: it.size, shared: it.shared, manual: it.manual, t: it.t, upd: seen[it.id] !== undefined });
       });
       all[me] = next; localStorage.setItem(SEEN_KEY, JSON.stringify(all));
       if (fresh.length) pushAlert(fresh, w);
     }
-    const alertLine = a => `${a.table} · ${a.shared ? '共享桌 ' + a.size + ' 人（不计人数）' : a.size + ' 人'}${a.upd ? '（已修改）' : ''}`;
+    const alertLine = a => `${a.table} · ${a.shared ? (a.manual ? '手动共享桌 ' : '共享桌 ') + a.size + ' 人（不计人数）' : a.size + ' 人'}${a.upd ? '（已修改）' : ''}`;
     function pushAlert(fresh, w) {
       ui.alert = { list: [...((ui.alert && ui.alert.list) || []), ...fresh] };
       const r = S.records[w.id], text = fresh.map(alertLine).join('；');
@@ -1207,7 +1228,7 @@
       const w = meWaiter(), r = w && S.records[w.id], list = ui.alert.list;
       return `<div class="mask"><div class="modal alert">
     <h3>🔔 ${esc(w ? w.name : '')}，你有新分配</h3>
-    ${list.map(a => `<div class="al ${a.shared ? 'share' : ''}"><b>${esc(a.table)}</b><span>${a.shared ? '共享桌 ' + a.size + ' 人<small>（不计人数）</small>' : a.size + ' 人'}${a.upd ? '<small>（已修改）</small>' : ''}</span><em>${fmtTime(a.t)}</em></div>`).join('')}
+    ${list.map(a => `<div class="al ${a.shared ? 'share' : ''}"><b>${esc(a.table)}</b><span>${a.shared ? (a.manual ? '手动共享桌 ' : '共享桌 ') + a.size + ' 人<small>（不计人数）</small>' : a.size + ' 人'}${a.upd ? '<small>（已修改）</small>' : ''}</span><em>${fmtTime(a.t)}</em></div>`).join('')}
     ${r ? `<div class="hint">你目前累计：${r.count} 人 · ${r.items.length} 桌 · 占位 ${activeOf(w.id)} 桌</div>` : ''}
     <div class="actions"><button class="btn" onclick="ackAlert()">我知道了</button></div>
   </div></div>`;
@@ -1220,7 +1241,7 @@
         ? `<button class="mini" style="margin-top:8px" onclick="askNotify()">开启系统通知</button>` : '';
       return `<div class="card mine">
     <div class="label">我的最新分配 · ${esc(w.name)}</div>
-    <div class="big">${last ? `${esc(last.table)} <span>${last.shared ? '共享桌 ' + last.size + ' 人(不计)' : last.size + ' 人'}</span> <small>${fmtTime(last.t)}${last.released ? ' · 已释放' : ''}</small>` : '<span class="hint">还没有分配</span>'}</div>
+    <div class="big">${last ? `${esc(last.table)} <span>${last.shared ? shareLabel(last) + ' ' + last.size + ' 人(不计)' : last.size + ' 人'}</span> <small>${fmtTime(last.t)}${last.released ? ' · 已释放' : ''}</small>` : '<span class="hint">还没有分配</span>'}</div>
     <div class="hint">累计 ${r.count} 人 · ${r.items.length} 桌 · 占位 ${activeOf(w.id)} 桌</div>${notif}
   </div>`;
     }
@@ -1370,7 +1391,7 @@
     function logout() {
       admin = false; localStorage.removeItem(AUTH_KEY);
       if (FB && fb) fb.A.signOut(fb.auth).catch(() => { });
-      ui.edit = ui.release = ui.login = ui.alert = null; ui.table = null; ui.size = null; ui.custom = '';
+      ui.edit = ui.release = ui.login = ui.alert = null; ui.table = null; ui.size = null; ui.custom = ''; ui.manual = false;
       render();
     }
     function viewLogin() {
@@ -1492,7 +1513,7 @@
         return `<div class="card logo-card"><img src="images/logo.png" alt="Restaurant logo"></div>`;   // 前台还没开始营业：显示店标
       }
       const nid = nextWaiter();
-      const shared = ui.size > SHARE_THRESHOLD;
+      const shared = ui.size > SHARE_THRESHOLD, manualOn = ui.manual;
       const ready = ui.table && ui.size >= 1;
       return `
   ${myCard()}
@@ -1519,7 +1540,8 @@ ${admin ? `  <div class="card">
         `<button data-n="${n}" class="${ui.size === n && !ui.custom ? 'sel' : ''}" onclick="pickSize(${n})">${n}</button>`).join('')}
       <input class="num" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" placeholder="其他" value="${esc(ui.custom || '')}" oninput="typeSize(this)">
     </div>
-    <div class="hint" id="sizeHint" style="color:#1971c2">${shared ? `人数 &gt; ${SHARE_THRESHOLD}：共享桌，只记录桌号，不计人数` : ''}</div>
+    <label class="manual"><input type="checkbox" ${manualOn ? 'checked' : ''} onchange="toggleManual(this.checked)"> 设为共享桌（无论人数，只记桌号，不计人数）</label>
+    <div class="hint" id="sizeHint" style="color:#1971c2">${sizeHintText()}</div>
     <div style="margin-top:12px"><button class="btn" id="assignBtn" style="width:100%" ${ready ? '' : 'disabled'} onclick="doAssign()">
       分配给 ${esc(wname(nid))}</button></div>
   </div>` : `  <div class="card">
@@ -1540,7 +1562,7 @@ ${admin ? `  <div class="card">
           return `<div class="w ${id === nid ? 'is-next' : ''}">
         <span class="badge">${i + 1}</span>
         <div class="info"><b>${esc(wname(id))}</b> ${id === nid ? '<span class="chip">下一位</span>' : ''}
-          <div>${r.items.map(it => `<${admin ? 'button' : 'span'} class="chip ${admin ? 'editable' : ''} ${it.shared ? 'share' : ''} ${it.released ? 'released' : ''}" title="${it.released ? '已释放' : '占位中'}" ${admin ? `onclick="openEdit('${it.id}')"` : ''}>${esc(it.table)}${it.shared ? ' 共享·' + it.size + '人(不计)' : '·' + it.size + '人'}</${admin ? 'button' : 'span'}>`).join('') || '<span class="hint">暂无</span>'}</div>
+          <div>${r.items.map(it => `<${admin ? 'button' : 'span'} class="chip ${admin ? 'editable' : ''} ${it.shared ? 'share' : ''} ${it.released ? 'released' : ''}" title="${it.released ? '已释放' : '占位中'}" ${admin ? `onclick="openEdit('${it.id}')"` : ''}>${esc(it.table)}${it.shared ? (it.manual ? ' 手动共享·' : ' 共享·') + it.size + '人(不计)' : '·' + it.size + '人'}</${admin ? 'button' : 'span'}>`).join('') || '<span class="hint">暂无</span>'}</div>
         </div>
         <div class="cnt">${r.count}<small> 人</small> <span style="color:#555">${r.items.length}</span><small> 桌</small><div class="hint" style="font-size:12px;font-weight:600;color:${activeOf(id) ? '#c92a2a' : '#868e96'}">占位 ${activeOf(id)} 桌</div>${sharedOf(id).length ? `<div class="hint" style="font-size:12px;font-weight:400;color:#1971c2">含共享 ${sharedOf(id).length} 桌</div>` : ''}</div>
       </div>`;
@@ -1552,7 +1574,7 @@ ${admin ? `  <div class="card">
     ${S.history.slice(-8).reverse().map(h => {
           const f = findItem(h.id); if (!f) return '';
           return `<div class="recent"><span>${fmtTime(h.time)}
-      ${esc(f.item.table)} → <b>${esc(wname(h.waiterId))}</b> ${f.item.shared ? `共享桌 ${f.item.size}人(不计)` : f.item.size + '人'}</span>
+      ${esc(f.item.table)} → <b>${esc(wname(h.waiterId))}</b> ${f.item.shared ? `${shareLabel(f.item)} ${f.item.size}人(不计)` : f.item.size + '人'}</span>
       ${admin ? `<button class="mini" style="color:#444" onclick="openEdit('${h.id}')">修改</button>` : ''}</div>`;
         }).join('')
         || '<div class="empty">暂无</div>'}
@@ -1644,6 +1666,11 @@ ${SHIFT_NAME.evening}（${shiftRange('evening')}）：${summary(inShift('evening
     function pickTable(c) {   // 选桌后整页重绘，需保留「其他」输入框的内容
       ui.table = c; render();
     }
+    function sizeHintText() {
+      return ui.manual ? '已手动设为共享桌：只记录桌号，不计人数'
+        : ui.size > SHARE_THRESHOLD ? `人数 &gt; ${SHARE_THRESHOLD}：共享桌，只记录桌号，不计人数` : '';
+    }
+    function toggleManual(on) { ui.manual = on; document.getElementById('sizeHint').innerHTML = sizeHintText(); }
     function pickSize(n) { ui.size = n; ui.custom = ''; render(); }
     // 「其他」输入框：只改局部元素，不整页重绘，所以不会丢焦点或清空输入
     function typeSize(inp) {
@@ -1653,17 +1680,16 @@ ${SHIFT_NAME.evening}（${shiftRange('evening')}）：${summary(inShift('evening
       ui.custom = digits;
       ui.size = n >= 1 ? n : null;
       document.querySelectorAll('.quick button').forEach(b => b.classList.remove('sel'));
-      const shared = ui.size > SHARE_THRESHOLD;
-      document.getElementById('sizeHint').innerHTML = shared ? `人数 &gt; ${SHARE_THRESHOLD}：共享桌，只记录桌号，不计人数` : '';
+      document.getElementById('sizeHint').innerHTML = sizeHintText();
       document.getElementById('assignBtn').disabled = !(ui.table && ui.size >= 1);
     }
     function doAssign() { if (needAdmin()) return;
       if (occupantOf(ui.table)) { ui.table = null; render(); return alert('该桌已被占位，请先释放'); }
       const t = S.tables.find(t => t.code === ui.table);
-      if (t && ui.size > t.cap && ui.size <= SHARE_THRESHOLD &&
+      if (t && !ui.manual && ui.size > t.cap && ui.size <= SHARE_THRESHOLD &&
         !confirm(`${t.code} 最多坐 ${t.cap} 人，当前 ${ui.size} 人，仍要分配吗？`)) return;
-      assign(ui.table, ui.size);
-      ui.table = null; ui.size = null; ui.custom = ''; render();
+      assign(ui.table, ui.size, ui.manual);
+      ui.table = null; ui.size = null; ui.custom = ''; ui.manual = false; render();
     }
     function doUndo() { if (needAdmin()) return; undo(); render(); }
     function doRedo() { if (needAdmin()) return; redo(); render(); }
