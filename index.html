@@ -834,7 +834,7 @@
         redoStack: []       // 重做栈
       };
     }
-    const save = () => { localStorage.setItem(KEY, JSON.stringify(S)); schedulePush(); };
+    const save = () => { localStorage.setItem(KEY, JSON.stringify(S)); if (!admin && meWaiter()) checkAlerts(true); schedulePush(); };   // 服务员自己的操作不用再提醒自己
 
     /* ---------- 图标（内联 SVG，无需外部资源） ---------- */
     const ICON_PATHS = {
@@ -1011,9 +1011,9 @@
       }
       return null;
     }
-    function openRelease(code) { if (needAdmin()) return; ui.release = code; render(); }
+    function openRelease(code) { ui.release = code; render(); }
     function closeRelease() { ui.release = null; render(); }
-    function doRelease() { if (needAdmin()) return;
+    function doRelease() {
       const code = ui.release, now = Date.now();
       const f = occupantOf(code);
       if (!f) return closeRelease();
@@ -1080,7 +1080,7 @@
       if (ui.edit && !codes.includes(ui.edit.origTable)) codes.unshift(ui.edit.origTable);
       return codes;
     }
-    function openEdit(id) { if (needAdmin()) return;
+    function openEdit(id) {
       const f = findItem(id);
       if (!f) return;
       ui.edit = { id, table: f.item.table, origTable: f.item.table, size: f.item.size, manual: !!f.item.manual };
@@ -1109,7 +1109,7 @@
       if (t && e.size > t.cap) return `<span style="color:#e03131">${esc(t.code)} 最多坐 ${t.cap} 人</span>`;
       return `计入服务人数：${e.size} 人`;
     }
-    function saveEdit() { if (needAdmin()) return;
+    function saveEdit() {
       const e = ui.edit, t = S.tables.find(t => t.code === e.table);
       if (!e.size) return;
       if (editConflict(e.table)) return alert(`${e.table} 已被占位，请先释放或选择其他桌`);
@@ -1118,7 +1118,7 @@
       editEntry(e.id, e.table, e.size, e.manual);
       closeEdit();
     }
-    function deleteEdit() { if (needAdmin()) return;
+    function deleteEdit() {
       if (!confirm('删除这条分配？该桌人数会从服务员记录中扣除')) return;
       removeEntry(ui.edit.id, '删除');
       closeEdit();
@@ -1262,8 +1262,8 @@
     const isDirty = () => localStorage.getItem(DIRTY_KEY) === '1';
 
     function schedulePush() {
-      if (!FB || !fb || !admin) return;
-      localStorage.setItem(DIRTY_KEY, '1');
+      if (!FB || !fb) return;
+      if (admin) localStorage.setItem(DIRTY_KEY, '1');   // 服务员的改动不记“未上传”：断网重开后以云端为准，避免覆盖前台的数据
       clearTimeout(pushTimer);
       pushTimer = setTimeout(pushNow, 250);
     }
@@ -1272,13 +1272,18 @@
       try {
         const { ref, set } = fb.D;
         if (st !== lastStateJson) { await set(ref(fb.db, SYNC_PATH + '/state'), { v: st, t: Date.now(), by: CLIENT_ID }); lastStateJson = st; }
-        if (ar !== lastArchiveJson) { await set(ref(fb.db, SYNC_PATH + '/archive'), { v: ar, t: Date.now(), by: CLIENT_ID }); lastArchiveJson = ar; }
+        if (admin && ar !== lastArchiveJson) { await set(ref(fb.db, SYNC_PATH + '/archive'), { v: ar, t: Date.now(), by: CLIENT_ID }); lastArchiveJson = ar; }
         if (JSON.stringify(sharedState()) === st) localStorage.removeItem(DIRTY_KEY);   // 期间没有新改动才算同步完
         if (syncStatus === 'error' || syncStatus === 'denied') { syncStatus = 'online'; renderHeader(); }
       } catch (e) {
         console.warn('同步失败', e);
         // PERMISSION_DENIED：已登录，但这个账号的邮箱不在 Firebase 规则的写入名单里
-        syncStatus = /PERMISSION_DENIED/i.test(e.code || e.message || '') ? 'denied' : 'error'; renderHeader();
+        const denied = /PERMISSION_DENIED/i.test(e.code || e.message || '');
+        syncStatus = denied ? 'denied' : 'error'; renderHeader();
+        if (denied && !admin) {            // 服务员写入被规则拒绝：这次操作没有保存，恢复成云端的数据，避免本机和云端不一致
+          alert('没有写入权限，刚才的操作没有保存。\n请让前台按 README 更新 Firebase 规则（开放 whosenext/state 的写入）。');
+          fb.D.get(fb.D.ref(fb.db, SYNC_PATH + '/state')).then(sn => { lastStateJson = ''; const v = sn.val(); if (v) onRemoteState(Object.assign({}, v, { by: '' })); }).catch(() => { });
+        }
       }
     }
 
@@ -1292,7 +1297,7 @@
       }
       remoteEmpty = false; syncAt = val.t || 0;
       if (val.by === CLIENT_ID) { lastStateJson = val.v; return renderHeader(); }   // 自己写的回声，忽略
-      if (isDirty()) { schedulePush(); return render(); }                           // 本机有没上传的改动，以本机为准
+      if (admin && isDirty()) { schedulePush(); return render(); }                           // 本机有没上传的改动，以本机为准
       let d; try { d = JSON.parse(val.v); } catch (e) { return; }
       S = Object.assign({}, d, { logArchive: S.logArchive || [], undoStack: [], redoStack: [] });
       recount();
@@ -1335,7 +1340,7 @@
       });
     }
     const SYNC_TEXT = {
-      get denied() { const u = fb && fb.auth.currentUser; return `⚠ 无写入权限${u && u.email ? '：' + u.email : ''}（请把该邮箱加入 Firebase 规则）`; }, connecting: '连接中…', online: '● 已同步', offline: '○ 离线（恢复后自动同步）', error: '⚠ 同步失败', unavailable: '⚠ 无法连接同步服务' };
+      get denied() { const u = fb && fb.auth.currentUser; return admin ? `⚠ 无写入权限${u && u.email ? '：' + u.email : ''}（请把该邮箱加入 Firebase 规则）` : '⚠ 无写入权限（请更新 Firebase 规则）'; }, connecting: '连接中…', online: '● 已同步', offline: '○ 离线（恢复后自动同步）', error: '⚠ 同步失败', unavailable: '⚠ 无法连接同步服务' };
 
     /* ---------- 前台登录 ---------- */
     function openLogin() {
@@ -1397,7 +1402,7 @@
     function viewLogin() {
       return `<div class="mask" onclick="if(event.target===this)closeLogin()"><div class="modal">
     <h3>前台登录</h3>
-    <div class="hint">服务员无需登录，直接查看即可；前台登录后才能分配、修改、释放和配置。</div>
+    <div class="hint">服务员无需登录，可在分配页分配、修改、释放；前台登录后才能开始/结束营业、改上岗名单、看日志和配置。</div>
     ${FB ? `<button class="gbtn" onclick="doGoogleLogin()"><svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.9 6.1C12.4 13.6 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.5 5.8c4.4-4.1 7.1-10.1 7.1-17.5z"/><path fill="#FBBC05" d="M10.5 28.7a14.500 14.500 0 0 1 0-9.4l-7.9-6.1a24 24 0 0 0 0 21.600l7.900-6.100z"/><path fill="#34A853" d="M24 48c6.500 0 11.900-2.100 15.900-5.800l-7.500-5.800c-2.100 1.400-4.800 2.300-8.400 2.300-6.300 0-11.600-4.100-13.500-9.800l-7.900 6.100C6.500 42.600 14.600 48 24 48z"/></svg>使用 Google 登录</button>
     <div class="or">— 或使用邮箱密码 —</div>` : ''}
     <div class="lbl">${FB ? '用户名（邮箱）' : '用户名'}</div>
@@ -1418,7 +1423,7 @@
       document.getElementById('hdrAuth').innerHTML = sync + (!HAS_LOGIN ? ''
         : admin ? `<span class="role">前台</span><button onclick="logout()">退出</button>`
           : (FB && meWaiter() ? `<span class="role">${esc(me)}</span><button onclick="openPick()">切换服务员</button>`
-            : FB && authReady ? `<button onclick="openPick()">选择服务员</button>` : `<span class="role">只读</span>`)
+            : FB && authReady ? `<button onclick="openPick()">选择服务员</button>` : `<span class="role">服务员</span>`)
           + `<button onclick="openLogin()">前台登录</button>`);
     }
     function render() {
@@ -1523,7 +1528,7 @@
     <div class="label">当前已服务 ${S.records[nid].count} 人 · ${S.records[nid].items.length} 桌 · 占位 ${activeOf(nid)} 桌</div>
   </div>
 
-${admin ? `  <div class="card">
+  <div class="card">
     <h3 class="bar">客人到店 <span class="head-tools">
       ${ibtn('undo', S.undoStack.length ? '撤销：' + S.undoStack[S.undoStack.length - 1].label : '撤销', 'doUndo()', { disabled: !S.undoStack.length })}
       ${ibtn('redo', S.redoStack.length ? '重做：' + S.redoStack[S.redoStack.length - 1].label : '重做', 'doRedo()', { disabled: !S.redoStack.length })}
@@ -1544,16 +1549,7 @@ ${admin ? `  <div class="card">
     <div class="hint" id="sizeHint" style="color:#1971c2">${sizeHintText()}</div>
     <div style="margin-top:12px"><button class="btn" id="assignBtn" style="width:100%" ${ready ? '' : 'disabled'} onclick="doAssign()">
       分配给 ${esc(wname(nid))}</button></div>
-  </div>` : `  <div class="card">
-    <h3>餐桌占位情况</h3>
-    <div class="label hint">红色 = 占位中（只读）${FB && syncAt ? ' · 数据更新于 ' + fmtTime(syncAt) : ''}</div>
-    ${S.tables.length ? layoutGrid(S.tables, t => {
-        const o = occupantOf(t.code);
-        return o
-          ? `<button class="occ ro" disabled>${esc(t.code)} <small>占位·${esc(wname(o.waiterId))}·${o.item.size}人</small></button>`
-          : `<button class="ro" disabled>${esc(t.code)} <small>/${t.cap}人</small></button>`;
-      }) : '<div class="empty">暂无餐桌</div>'}
-  </div>`}
+  </div>
 
   <div class="card board">
     <h3>今日服务情况</h3>
@@ -1562,7 +1558,7 @@ ${admin ? `  <div class="card">
           return `<div class="w ${id === nid ? 'is-next' : ''}">
         <span class="badge">${i + 1}</span>
         <div class="info"><b>${esc(wname(id))}</b> ${id === nid ? '<span class="chip">下一位</span>' : ''}
-          <div>${r.items.map(it => `<${admin ? 'button' : 'span'} class="chip ${admin ? 'editable' : ''} ${it.shared ? 'share' : ''} ${it.released ? 'released' : ''}" title="${it.released ? '已释放' : '占位中'}" ${admin ? `onclick="openEdit('${it.id}')"` : ''}>${esc(it.table)}${it.shared ? (it.manual ? ' 手动共享·' : ' 共享·') + it.size + '人(不计)' : '·' + it.size + '人'}</${admin ? 'button' : 'span'}>`).join('') || '<span class="hint">暂无</span>'}</div>
+          <div>${r.items.map(it => `<button class="chip editable ${it.shared ? 'share' : ''} ${it.released ? 'released' : ''}" title="${it.released ? '已释放' : '占位中'}" onclick="openEdit('${it.id}')">${esc(it.table)}${it.shared ? (it.manual ? ' 手动共享·' : ' 共享·') + it.size + '人(不计)' : '·' + it.size + '人'}</button>`).join('') || '<span class="hint">暂无</span>'}</div>
         </div>
         <div class="cnt">${r.count}<small> 人</small> <span style="color:#555">${r.items.length}</span><small> 桌</small><div class="hint" style="font-size:12px;font-weight:600;color:${activeOf(id) ? '#c92a2a' : '#868e96'}">占位 ${activeOf(id)} 桌</div>${sharedOf(id).length ? `<div class="hint" style="font-size:12px;font-weight:400;color:#1971c2">含共享 ${sharedOf(id).length} 桌</div>` : ''}</div>
       </div>`;
@@ -1575,7 +1571,7 @@ ${admin ? `  <div class="card">
           const f = findItem(h.id); if (!f) return '';
           return `<div class="recent"><span>${fmtTime(h.time)}
       ${esc(f.item.table)} → <b>${esc(wname(h.waiterId))}</b> ${f.item.shared ? `${shareLabel(f.item)} ${f.item.size}人(不计)` : f.item.size + '人'}</span>
-      ${admin ? `<button class="mini" style="color:#444" onclick="openEdit('${h.id}')">修改</button>` : ''}</div>`;
+      <button class="mini" style="color:#444" onclick="openEdit('${h.id}')">修改</button></div>`;
         }).join('')
         || '<div class="empty">暂无</div>'}
   </div>`;
@@ -1683,7 +1679,7 @@ ${SHIFT_NAME.evening}（${shiftRange('evening')}）：${summary(inShift('evening
       document.getElementById('sizeHint').innerHTML = sizeHintText();
       document.getElementById('assignBtn').disabled = !(ui.table && ui.size >= 1);
     }
-    function doAssign() { if (needAdmin()) return;
+    function doAssign() {
       if (occupantOf(ui.table)) { ui.table = null; render(); return alert('该桌已被占位，请先释放'); }
       const t = S.tables.find(t => t.code === ui.table);
       if (t && !ui.manual && ui.size > t.cap && ui.size <= SHARE_THRESHOLD &&
@@ -1691,8 +1687,8 @@ ${SHIFT_NAME.evening}（${shiftRange('evening')}）：${summary(inShift('evening
       assign(ui.table, ui.size, ui.manual);
       ui.table = null; ui.size = null; ui.custom = ''; ui.manual = false; render();
     }
-    function doUndo() { if (needAdmin()) return; undo(); render(); }
-    function doRedo() { if (needAdmin()) return; redo(); render(); }
+    function doUndo() { undo(); render(); }
+    function doRedo() { redo(); render(); }
     function resetAll() { if (needAdmin()) return; if (prompt('⚠ 这会清空所有数据（服务员、餐桌、往日日志、可恢复的营业记录），开启同步时云端数据也会被清空，且无法恢复。\n请输入“清空”确认：') === '清空') { localStorage.removeItem(KEY); S = load(); ui = { tab: 'config' }; save(); render(); } }
 
     document.getElementById('nav').addEventListener('click', e => {
@@ -1718,7 +1714,7 @@ ${SHIFT_NAME.evening}（${shiftRange('evening')}）：${summary(inShift('evening
     document.addEventListener('keydown', e => {
       if (e.key === 'Escape') { if (ui.release) closeRelease(); else if (ui.edit) closeEdit(); else if (ui.login) closeLogin(); return; }
       // Ctrl/Cmd+Z 撤销，Ctrl/Cmd+Shift+Z 重做（在输入框里时不拦截）
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z' && admin && S.started && !/INPUT|TEXTAREA/.test((document.activeElement || {}).tagName || '')) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z' && S.started && !/INPUT|TEXTAREA/.test((document.activeElement || {}).tagName || '')) {
         e.preventDefault(); e.shiftKey ? doRedo() : doUndo();
       }
     });
