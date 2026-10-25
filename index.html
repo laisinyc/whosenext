@@ -178,6 +178,10 @@
       font-size: 16px;
     }
 
+    .duty.rolling {
+      background: #fff4e6;
+    }
+
     .duty input {
       width: 22px;
       height: 22px;
@@ -1477,22 +1481,22 @@
   ${restoreCard()}
   <div class="card">
     <h3>勾选今天在职的服务员 <span class="hint">（上岗顺序 = 初始排序）</span></h3>
-    ${!locked && S.onDuty.length > 1 ? `<div class="row" style="margin:4px 0 8px"><button class="btn gray" onclick="shuffleDuty()">随机排序</button></div>
+    ${!locked && S.onDuty.length > 1 ? `<div class="row" style="margin:4px 0 8px"><button class="btn gray" ${ui.shuffling ? 'disabled' : ''} onclick="shuffleDuty()">${ui.shuffling ? '随机中…' : '随机排序'}</button></div>
     <div class="hint" style="margin-bottom:4px">随机排序后，仍可用每行的“上移 / 下移”手动调整。</div>` : ''}
     ${[...S.onDuty.map(id => S.waiters.find(w => w.id === id)).filter(Boolean), ...S.waiters.filter(w => !S.onDuty.includes(w.id))].map(w => {
         const idx = S.onDuty.indexOf(w.id), on = idx >= 0;
-        return `<label class="duty">
-        <input type="checkbox" ${on ? 'checked' : ''} ${locked ? 'disabled' : ''} onchange="toggleDuty('${w.id}')">
+        return `<label class="duty ${ui.shuffling && on ? 'rolling' : ''}" data-id="${w.id}">
+        <input type="checkbox" ${on ? 'checked' : ''} ${locked || ui.shuffling ? 'disabled' : ''} onchange="toggleDuty('${w.id}')">
         <span style="flex:1">${esc(w.name)}</span>
-        ${on && !locked ? `<button class="mini" style="color:#444" ${idx === 0 ? 'disabled' : ''} onclick="moveDuty('${w.id}',-1)">上移</button>
-        <button class="mini" style="color:#444" ${idx === S.onDuty.length - 1 ? 'disabled' : ''} onclick="moveDuty('${w.id}',1)">下移</button>` : ''}
+        ${on && !locked ? `<button class="mini" style="color:#444" ${idx === 0 || ui.shuffling ? 'disabled' : ''} onclick="moveDuty('${w.id}',-1)">上移</button>
+        <button class="mini" style="color:#444" ${idx === S.onDuty.length - 1 || ui.shuffling ? 'disabled' : ''} onclick="moveDuty('${w.id}',1)">下移</button>` : ''}
         ${on ? `<span class="badge">${idx + 1}</span>` : ''}
       </label>`;
       }).join('')}
     <div style="margin-top:12px" class="row">
       ${locked
           ? `<button class="btn red" onclick="endDay()">结束当前 / 重新开始</button>`
-          : `<button class="btn" ${S.onDuty.length ? '' : 'disabled'} onclick="startDay()">开始营业（${S.onDuty.length} 人）</button>`}
+          : `<button class="btn" ${S.onDuty.length && !ui.shuffling ? '' : 'disabled'} onclick="startDay()">开始营业（${S.onDuty.length} 人）</button>`}
     </div>
   </div>`;
     }
@@ -1609,27 +1613,43 @@
     }
     function delTable(code) { if (needAdmin()) return; S.tables = S.tables.filter(t => t.code !== code); save(); render(); }
 
-    function toggleDuty(id) { if (needAdmin()) return;
+    function toggleDuty(id) { if (needAdmin() || ui.shuffling) return;
       const i = S.onDuty.indexOf(id);
       if (i >= 0) S.onDuty.splice(i, 1); else S.onDuty.push(id);
       save(); render();
     }
-    // 随机打乱上岗顺序（营业前）；打乱后仍可手动上移 / 下移
-    function shuffleDuty() { if (needAdmin() || S.started || S.onDuty.length < 2) return;
-      const before = S.onDuty.join(), a = S.onDuty.slice();
-      for (let t = 0; t < 5; t++) {                      // Fisher–Yates；尽量不要洗出和原来一样的顺序
-        for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
-        if (a.join() !== before) break;
-      }
-      S.onDuty = a; save(); render();
+    // 随机打乱上岗顺序（营业前）：先“洗牌”几轮（行与行滑动换位，越来越慢），最后停在结果上；打乱后仍可手动上移 / 下移
+    const shuffled = arr => { const a = arr.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+    // 重新渲染，并让「今日上岗」里的行从旧位置滑到新位置（FLIP）
+    function renderSlide() {
+      const rows = () => [...document.querySelectorAll('#app .duty[data-id]')];
+      const before = {}; rows().forEach(r => before[r.dataset.id] = r.getBoundingClientRect().top);
+      render();
+      const moved = rows().filter(r => before[r.dataset.id] !== undefined && Math.abs(before[r.dataset.id] - r.getBoundingClientRect().top) > 1);
+      moved.forEach(r => { r.style.transition = 'none'; r.style.transform = `translateY(${before[r.dataset.id] - r.getBoundingClientRect().top}px)`; });
+      void document.body.offsetHeight;
+      moved.forEach(r => { r.style.transition = 'transform .28s ease'; r.style.transform = ''; });
     }
-    function moveDuty(id, d) { if (needAdmin() || S.started) return;
+    function shuffleDuty() { if (needAdmin() || S.started || S.onDuty.length < 2 || ui.shuffling) return;
+      const original = S.onDuty.slice();
+      let final = shuffled(original);
+      for (let t = 0; t < 5 && final.join() === original.join(); t++) final = shuffled(original);
+      const delays = [150, 170, 190, 220, 260, 310, 380, 470];      // 间隔逐渐变长：像转盘慢慢停下
+      ui.shuffling = true; renderSlide();
+      let k = 0;
+      const step = () => {
+        if (k < delays.length) { S.onDuty = shuffled(original); setTimeout(() => { renderSlide(); step(); }, delays[k++]); return; }
+        S.onDuty = final; ui.shuffling = false; save(); renderSlide();
+      };
+      setTimeout(step, 120);
+    }
+    function moveDuty(id, d) { if (needAdmin() || S.started || ui.shuffling) return;
       const i = S.onDuty.indexOf(id), j = i + d;
       if (i < 0 || j < 0 || j >= S.onDuty.length) return;
       [S.onDuty[i], S.onDuty[j]] = [S.onDuty[j], S.onDuty[i]];
       save(); render();
     }
-    function startDay() { if (needAdmin()) return;
+    function startDay() { if (needAdmin() || ui.shuffling) return;
       S.records = {}; S.history = []; S.log = []; S.undoStack = []; S.redoStack = [];
       S.onDuty.forEach(id => S.records[id] = { count: 0, items: [] });
       S.started = true;
