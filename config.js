@@ -12,13 +12,12 @@ window.WHOSENEXT_CONFIG = {
 
   // 服务员名字（名字不能重复）
   waiters: [
-    "Dora",
-    "Jing",
     "Ava",
+    "Jing",
+    "Dora",
     "Wenjie",
     "Ge",
     "Jennifer",
-    "Who"
   ],
 
   // 餐桌：code = 桌号/代号，cap = 最多可坐人数
