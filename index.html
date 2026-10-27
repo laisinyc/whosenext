@@ -1201,6 +1201,9 @@
     const ME_KEY = 'whosenext.me', SEEN_KEY = 'whosenext.seen';
     let me = localStorage.getItem(ME_KEY) || '';          // 服务员名字；'-' = 前台设备 / 选择跳过
     let authReady = false;                                 // Firebase 已经告知登录状态（避免前台刷新时闪一下选人窗口）
+    // 服务员名字按字母顺序排序（中文按拼音）；只影响显示，上岗顺序（初始排序）仍由「今日上岗」决定
+    const nameCollator = new Intl.Collator(['en', 'zh-u-co-pinyin'], { sensitivity: 'base', numeric: true });
+    const waitersAZ = list => list.slice().sort((a, b) => nameCollator.compare(a.name, b.name));
     const meWaiter = () => S.waiters.find(w => w.name === me);
     const needPick = () => !admin && FB && (ui.pick || (authReady && syncReady && me !== '-' && !meWaiter() && S.waiters.length > 0));
     const itemSig = it => it.table + '|' + it.size + (it.manual ? '|m' : '');
@@ -1257,7 +1260,7 @@
       return `<div class="mask"><div class="modal">
     <h3>请选择</h3>
     <div class="hint">选择后，前台给你分配新桌时会提醒你。选择记在这台手机上，之后可点右上角名字更换。</div>
-    <div class="pick">${S.waiters.map(w => `<button class="${w.name === me ? 'sel' : ''}" onclick="setMe(${esc(JSON.stringify(w.name)).replace(/'/g, '&#39;')})">${esc(w.name)}</button>`).join('')}</div>
+    <div class="pick">${waitersAZ(S.waiters).map(w => `<button class="${w.name === me ? 'sel' : ''}" onclick="setMe(${esc(JSON.stringify(w.name)).replace(/'/g, '&#39;')})">${esc(w.name)}</button>`).join('')}</div>
     <div class="actions"><button class="btn gray" onclick="closePick()">取消</button></div>
   </div></div>`;
     }
@@ -1489,7 +1492,7 @@
     <h3>服务员</h3>
     <div class="row"><input type="text" id="wName" placeholder="输入服务员名字" onkeydown="if(event.key==='Enter')addWaiter()">
       <button class="btn" onclick="addWaiter()">添加</button></div>
-    <ul>${S.waiters.map(w => `<li><span>${esc(w.name)}</span><button class="mini" onclick="delWaiter('${w.id}')">删除</button></li>`).join('')
+    <ul>${waitersAZ(S.waiters).map(w => `<li><span>${esc(w.name)}</span><button class="mini" onclick="delWaiter('${w.id}')">删除</button></li>`).join('')
         || '<div class="empty">暂无服务员</div>'}</ul>
   </div>
   <div class="card">
@@ -1513,7 +1516,7 @@
     <h3>勾选今天在职的服务员 <span class="hint">（上岗顺序 = 初始排序）</span></h3>
     ${!locked && S.onDuty.length > 1 ? `<div class="row" style="margin:4px 0 8px"><button class="btn gray" ${ui.shuffling ? 'disabled' : ''} onclick="shuffleDuty()">${ui.shuffling ? '随机中…' : '随机排序'}</button></div>
     <div class="hint" style="margin-bottom:4px">随机排序后，仍可用每行的“上移 / 下移”手动调整。</div>` : ''}
-    ${[...S.onDuty.map(id => S.waiters.find(w => w.id === id)).filter(Boolean), ...S.waiters.filter(w => !S.onDuty.includes(w.id))].map(w => {
+    ${[...S.onDuty.map(id => S.waiters.find(w => w.id === id)).filter(Boolean), ...waitersAZ(S.waiters.filter(w => !S.onDuty.includes(w.id)))].map(w => {
         const idx = S.onDuty.indexOf(w.id), on = idx >= 0;
         return `<div class="dutywrap ${ui.shuffling && on ? 'rolling' : ''}" data-id="${w.id}"><label class="duty">
         <input type="checkbox" ${on ? 'checked' : ''} ${locked || ui.shuffling ? 'disabled' : ''} onchange="toggleDuty('${w.id}')">
