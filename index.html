@@ -457,6 +457,13 @@
       color: #1971c2;
     }
 
+    .logline .who {
+      display: block;
+      margin-top: 2px;
+      font-size: 11px;
+      color: var(--mute);
+    }
+
     .logline .st {
       display: block;
       color: var(--mute);
@@ -920,8 +927,27 @@
     const activeOf = id => S.records[id].items.filter(it => !it.released).length;
     // 共享桌只留记录，不计入人数；这里单独标出共享桌数量
     const standings = () => S.onDuty.map(id => `${wname(id)} ${S.records[id].count}人/${S.records[id].items.length}桌/占位${activeOf(id)}` + (sharedOf(id).length ? `(含共享${sharedOf(id).length}桌)` : '')).join(' | ');
+    /* 每条日志记录操作人（前台 / 服务员名字）和操作设备的 IP 及大致位置。
+       IP 和位置由浏览器向 ipwho.is 查询（按 IP 估算到城市级别，不是精确地址；查不到时只记操作人）；
+       config.js 里设 logClientIp: false 可关闭。 */
+    const LOG_IP = CFG.logClientIp !== false;
+    let NET = null, netTried = 0;
+    function lookupNet() {
+      if (!LOG_IP || Date.now() - netTried < 30000) return;     // 查询失败时 30 秒内不重试
+      netTried = Date.now();
+      fetch('https://ipwho.is/').then(r => r.json()).then(d => {
+        if (!d || d.success === false || !d.ip) return;
+        const isp = d.connection && (d.connection.isp || d.connection.org);
+        NET = { ip: d.ip, loc: [d.city, d.region, d.country].filter(Boolean).join(', ') + (isp ? ' · ' + isp : ''), at: Date.now() };
+      }).catch(() => { });
+    }
+    const whoAmI = () => admin ? '前台' : ((meWaiter() || {}).name || '服务员');
+    const whoText = e => e.who ? `${e.who}${e.ip ? ` · IP ${e.ip}${e.loc ? '（' + e.loc + '）' : ''}` : ''}` : '';
     function addLog(type, text, withStandings) {
-      S.log.push({ t: Date.now(), type, text, st: withStandings ? standings() : '' });
+      if (LOG_IP && (!NET || Date.now() - NET.at > 30 * 60 * 1000)) lookupNet();     // IP 可能变化（换网络），每 30 分钟刷新
+      const e = { t: Date.now(), type, text, st: withStandings ? standings() : '', who: whoAmI() };
+      if (LOG_IP && NET) { e.ip = NET.ip; e.loc = NET.loc; }
+      S.log.push(e);
     }
     // 汇总；pred 可按条目筛选（例如只看某个班次）
     function summary(pred = () => true, withInit = false) {
@@ -938,7 +964,7 @@
     // 导出文本：按时间自动分成 上午班 / 晚班 两部分
     function logToText(date, entries) {
       const sh = splitShifts(entries);
-      const fmt = e => `[${fmtTime(e.t)}] ${e.text.replace(/\n/g, '\n           ')}` + (e.st ? `\n           当前人数：${e.st}` : '');
+      const fmt = e => `[${fmtTime(e.t)}] ${e.text.replace(/\n/g, '\n           ')}` + (e.st ? `\n           当前人数：${e.st}` : '') + (e.who ? `\n           操作人：${whoText(e)}` : '');
       const sec = k => `===== ${SHIFT_NAME[k]}（${shiftRange(k)}）=====\n` + (sh[k].map(fmt).join('\n') || '(无记录)');
       return `Whose Next 排班日志 ${date}\n` + sec('morning') + '\n\n' + sec('evening') + '\n';
     }
@@ -1541,7 +1567,7 @@
     }
 
     function viewLog() {
-      const line = e => `<div class="logline ${e.type}"><span class="t">${fmtTime(e.t)}</span>${esc(e.text)}${e.st ? `<span class="st">当前人数：${esc(e.st)}</span>` : ''}</div>`;
+      const line = e => `<div class="logline ${e.type}"><span class="t">${fmtTime(e.t)}</span>${esc(e.text)}${e.st ? `<span class="st">当前人数：${esc(e.st)}</span>` : ''}${e.who ? `<span class="who">操作人：${esc(whoText(e))}</span>` : ''}</div>`;
       const sh = splitShifts(S.log);
       const section = k => `<div class="shift">${SHIFT_NAME[k]}<small>${shiftRange(k)} · ${sh[k].length} 条</small></div>`
         + (sh[k].slice().reverse().map(line).join('') || '<div class="hint">暂无记录</div>');
@@ -1821,6 +1847,7 @@ ${SHIFT_NAME.evening}（${shiftRange('evening')}）：${summary(inShift('evening
     // 首次使用（浏览器里还没有服务员和餐桌）时自动读取 config.js
     if (!S.waiters.length && !S.tables.length) { applyConfig(); save(); }
     render();
+    lookupNet();
     initSync();
 
     // PWA：注册 Service Worker（需要 https 或 localhost；直接双击打开本地文件时会自动跳过）
