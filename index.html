@@ -178,8 +178,35 @@
       font-size: 16px;
     }
 
-    .duty.rolling {
+    .dutywrap.rolling {
       background: #fff4e6;
+    }
+
+    .initrow {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 4px 10px 36px;
+      font-size: 14px;
+      color: var(--mute);
+    }
+
+    .initrow input {
+      width: 64px;
+      padding: 6px;
+      text-align: center;
+      font-size: 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    .initrow .step {
+      width: 34px;
+      height: 34px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      font-size: 18px;
     }
 
     .duty input {
@@ -816,7 +843,8 @@
         .filter(t => t.code && t.cap >= 1 && !seen.has(t.code) && seen.add(t.code));
       S.onDuty = S.onDuty.filter(id => S.waiters.some(w => w.id === id));
     }
-    function importConfig() { if (needAdmin()) return;
+    function importConfig() {
+      if (needAdmin()) return;
       if (!window.WHOSENEXT_CONFIG) return alert('没有找到 config.js，请确认它和 index.html 在同一目录');
       if (S.started) return alert('营业中不能导入，请先在「今日上岗」结束当前');
       if (!confirm('用 config.js 覆盖当前的服务员和餐桌列表？')) return;
@@ -896,14 +924,15 @@
       S.log.push({ t: Date.now(), type, text, st: withStandings ? standings() : '' });
     }
     // 汇总；pred 可按条目筛选（例如只看某个班次）
-    function summary(pred = () => true) {
+    function summary(pred = () => true, withInit = false) {
       return S.onDuty.map((id, i) => {
         const items = S.records[id].items.filter(pred);
         const normal = items.filter(it => !it.shared);
         const n = normal.reduce((a, it) => a + it.size, 0);
         const tb = normal.map(it => `${it.table}(${it.size}人)`).join('、') || '无';
         const sh = items.filter(it => it.shared).map(it => `${it.table}(${it.size}人${it.manual ? '，手动' : ''})`).join('、');
-        return `${i + 1}.${wname(id)} 共${n}人，${items.length}桌，桌号：${tb}` + (sh ? `；共享桌(不计人数)：${sh}` : '');
+        const init = withInit ? (S.records[id].init || 0) : 0;
+        return `${i + 1}.${wname(id)} 共${n + init}人${init ? `（含初始${init}人）` : ''}，${items.length}桌，桌号：${tb}` + (sh ? `；共享桌(不计人数)：${sh}` : '');
       }).join('；');
     }
     // 导出文本：按时间自动分成 上午班 / 晚班 两部分
@@ -926,11 +955,11 @@
     // 共享桌 = 人数 > 阈值，或前台手动勾选了「设为共享桌」（manual，无论人数）
     const calcShared = (size, manual) => !!manual || isShared(size);
     const shareLabel = it => it.manual ? '手动共享桌' : '共享桌';
-    // 人数 = 非共享桌的人数之和（共享桌不计）
+    // 人数 = 初始人数 + 非共享桌的人数之和（共享桌不计）
     function recount() {
       for (const id in S.records) {
         const r = S.records[id];
-        r.count = r.items.reduce((n, it) => n + (it.shared ? 0 : it.size), 0);
+        r.count = (r.init || 0) + r.items.reduce((n, it) => n + (it.shared ? 0 : it.size), 0);
       }
     }
     function findItem(id) {
@@ -1348,7 +1377,8 @@
       });
     }
     const SYNC_TEXT = {
-      get denied() { const u = fb && fb.auth.currentUser; return admin ? `⚠ 无写入权限${u && u.email ? '：' + u.email : ''}（请把该邮箱加入 Firebase 规则）` : '⚠ 无写入权限（请更新 Firebase 规则）'; }, connecting: '连接中…', online: '● 已同步', offline: '○ 离线（恢复后自动同步）', error: '⚠ 同步失败', unavailable: '⚠ 无法连接同步服务' };
+      get denied() { const u = fb && fb.auth.currentUser; return admin ? `⚠ 无写入权限${u && u.email ? '：' + u.email : ''}（请把该邮箱加入 Firebase 规则）` : '⚠ 无写入权限（请更新 Firebase 规则）'; }, connecting: '连接中…', online: '● 已同步', offline: '○ 离线（恢复后自动同步）', error: '⚠ 同步失败', unavailable: '⚠ 无法连接同步服务'
+    };
 
     /* ---------- 前台登录 ---------- */
     function openLogin() {
@@ -1485,13 +1515,19 @@
     <div class="hint" style="margin-bottom:4px">随机排序后，仍可用每行的“上移 / 下移”手动调整。</div>` : ''}
     ${[...S.onDuty.map(id => S.waiters.find(w => w.id === id)).filter(Boolean), ...S.waiters.filter(w => !S.onDuty.includes(w.id))].map(w => {
         const idx = S.onDuty.indexOf(w.id), on = idx >= 0;
-        return `<label class="duty ${ui.shuffling && on ? 'rolling' : ''}" data-id="${w.id}">
+        return `<div class="dutywrap ${ui.shuffling && on ? 'rolling' : ''}" data-id="${w.id}"><label class="duty">
         <input type="checkbox" ${on ? 'checked' : ''} ${locked || ui.shuffling ? 'disabled' : ''} onchange="toggleDuty('${w.id}')">
         <span style="flex:1">${esc(w.name)}</span>
         ${on && !locked ? `<button class="mini" style="color:#444" ${idx === 0 || ui.shuffling ? 'disabled' : ''} onclick="moveDuty('${w.id}',-1)">上移</button>
         <button class="mini" style="color:#444" ${idx === S.onDuty.length - 1 || ui.shuffling ? 'disabled' : ''} onclick="moveDuty('${w.id}',1)">下移</button>` : ''}
         ${on ? `<span class="badge">${idx + 1}</span>` : ''}
-      </label>`;
+      </label>
+      ${on ? (locked ? (((S.records[w.id] || {}).init) ? `<div class="initrow">初始人数：<b>${S.records[w.id].init}</b></div>` : '')
+        : `<div class="initrow">初始人数
+        <button class="step" ${ui.shuffling ? 'disabled' : ''} onclick="initStep('${w.id}',-1)">−</button>
+        <input type="number" min="0" max="999" inputmode="numeric" value="${initOf(w.id)}" ${ui.shuffling ? 'disabled' : ''} onfocus="this.select()" oninput="setInit('${w.id}',this.value)">
+        <button class="step" ${ui.shuffling ? 'disabled' : ''} onclick="initStep('${w.id}',1)">+</button></div>`) : ''}
+      </div>`;
       }).join('')}
     <div style="margin-top:12px" class="row">
       ${locked
@@ -1572,7 +1608,7 @@
         <div class="info"><b>${esc(wname(id))}</b> ${id === nid ? '<span class="chip">下一位</span>' : ''}
           <div>${r.items.map(it => `<button class="chip editable ${it.shared ? 'share' : ''} ${it.released ? 'released' : ''}" title="${it.released ? '已释放' : '占位中'}" onclick="openEdit('${it.id}')">${esc(it.table)}${it.shared ? (it.manual ? ' 手动共享·' : ' 共享·') + it.size + '人(不计)' : '·' + it.size + '人'}</button>`).join('') || '<span class="hint">暂无</span>'}</div>
         </div>
-        <div class="cnt">${r.count}<small> 人</small> <span style="color:#555">${r.items.length}</span><small> 桌</small><div class="hint" style="font-size:12px;font-weight:600;color:${activeOf(id) ? '#c92a2a' : '#868e96'}">占位 ${activeOf(id)} 桌</div>${sharedOf(id).length ? `<div class="hint" style="font-size:12px;font-weight:400;color:#1971c2">含共享 ${sharedOf(id).length} 桌</div>` : ''}</div>
+        <div class="cnt">${r.count}<small> 人</small> <span style="color:#555">${r.items.length}</span><small> 桌</small><div class="hint" style="font-size:12px;font-weight:600;color:${activeOf(id) ? '#c92a2a' : '#868e96'}">占位 ${activeOf(id)} 桌</div>${r.init ? `<div class="hint" style="font-size:12px;font-weight:400;color:#868e96">含初始 ${r.init} 人</div>` : ''}${sharedOf(id).length ? `<div class="hint" style="font-size:12px;font-weight:400;color:#1971c2">含共享 ${sharedOf(id).length} 桌</div>` : ''}</div>
       </div>`;
         }).join('')}
   </div>
@@ -1590,20 +1626,23 @@
     }
 
     /* ---------- 操作 ---------- */
-    function addWaiter() { if (needAdmin()) return;
+    function addWaiter() {
+      if (needAdmin()) return;
       const el = document.getElementById('wName'); const name = el.value.trim();
       if (!name) return;
       if (S.waiters.some(w => w.name === name)) return alert('名字已存在');
       S.waiters.push({ id: uid(), name }); save(); render();
       document.getElementById('wName').focus();
     }
-    function delWaiter(id) { if (needAdmin()) return;
+    function delWaiter(id) {
+      if (needAdmin()) return;
       if (S.started && S.onDuty.includes(id)) return alert('该服务员今日在岗，请先结束当前再删除');
       S.waiters = S.waiters.filter(w => w.id !== id);
       S.onDuty = S.onDuty.filter(x => x !== id);
       save(); render();
     }
-    function addTable() { if (needAdmin()) return;
+    function addTable() {
+      if (needAdmin()) return;
       const code = document.getElementById('tCode').value.trim();
       const cap = parseInt(document.getElementById('tCap').value, 10);
       if (!code || !(cap >= 1)) return alert('请输入桌号和最多可坐人数');
@@ -1613,16 +1652,25 @@
     }
     function delTable(code) { if (needAdmin()) return; S.tables = S.tables.filter(t => t.code !== code); save(); render(); }
 
-    function toggleDuty(id) { if (needAdmin() || ui.shuffling) return;
+    // 初始人数：开始营业前给每位服务员手动设置“已经服务的人数”（默认 0），计入人数统计和轮转
+    const initOf = id => (S.initCounts && S.initCounts[id]) || 0;
+    function setInit(id, v) { if (needAdmin() || S.started) return;
+      const n = Math.max(0, Math.min(999, parseInt(v, 10) || 0));
+      S.initCounts = S.initCounts || {}; S.initCounts[id] = n;
+      save();
+    }
+    function initStep(id, d) { if (needAdmin() || S.started || ui.shuffling) return; setInit(id, initOf(id) + d); render(); }
+    function toggleDuty(id) {
+      if (needAdmin() || ui.shuffling) return;
       const i = S.onDuty.indexOf(id);
       if (i >= 0) S.onDuty.splice(i, 1); else S.onDuty.push(id);
       save(); render();
     }
     // 随机打乱上岗顺序（营业前）：先“洗牌”几轮（行与行滑动换位，越来越慢），最后停在结果上；打乱后仍可手动上移 / 下移
-    const shuffled = arr => { const a = arr.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+    const shuffled = arr => { const a = arr.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1));[a[i], a[j]] = [a[j], a[i]]; } return a; };
     // 重新渲染，并让「今日上岗」里的行从旧位置滑到新位置（FLIP）
     function renderSlide() {
-      const rows = () => [...document.querySelectorAll('#app .duty[data-id]')];
+      const rows = () => [...document.querySelectorAll('#app .dutywrap[data-id]')];
       const before = {}; rows().forEach(r => before[r.dataset.id] = r.getBoundingClientRect().top);
       render();
       const moved = rows().filter(r => before[r.dataset.id] !== undefined && Math.abs(before[r.dataset.id] - r.getBoundingClientRect().top) > 1);
@@ -1630,7 +1678,8 @@
       void document.body.offsetHeight;
       moved.forEach(r => { r.style.transition = 'transform .28s ease'; r.style.transform = ''; });
     }
-    function shuffleDuty() { if (needAdmin() || S.started || S.onDuty.length < 2 || ui.shuffling) return;
+    function shuffleDuty() {
+      if (needAdmin() || S.started || S.onDuty.length < 2 || ui.shuffling) return;
       const original = S.onDuty.slice();
       let final = shuffled(original);
       for (let t = 0; t < 5 && final.join() === original.join(); t++) final = shuffled(original);
@@ -1643,17 +1692,20 @@
       };
       setTimeout(step, 120);
     }
-    function moveDuty(id, d) { if (needAdmin() || S.started || ui.shuffling) return;
+    function moveDuty(id, d) {
+      if (needAdmin() || S.started || ui.shuffling) return;
       const i = S.onDuty.indexOf(id), j = i + d;
       if (i < 0 || j < 0 || j >= S.onDuty.length) return;
       [S.onDuty[i], S.onDuty[j]] = [S.onDuty[j], S.onDuty[i]];
       save(); render();
     }
-    function startDay() { if (needAdmin() || ui.shuffling) return;
+    function startDay() {
+      if (needAdmin() || ui.shuffling) return;
       S.records = {}; S.history = []; S.log = []; S.undoStack = []; S.redoStack = [];
-      S.onDuty.forEach(id => S.records[id] = { count: 0, items: [] });
+      S.onDuty.forEach(id => { const n = initOf(id); S.records[id] = { count: n, init: n, items: [] }; });
       S.started = true;
-      addLog('start', `开始营业，上岗顺序：${S.onDuty.map((id, i) => `${i + 1}.${wname(id)}`).join(' ')}；下一位：${wname(nextWaiter())}`);
+      const inits = S.onDuty.filter(id => initOf(id) > 0).map(id => `${wname(id)} ${initOf(id)}人`).join('、');
+      addLog('start', `开始营业，上岗顺序：${S.onDuty.map((id, i) => `${i + 1}.${wname(id)}`).join(' ')}${inits ? `；初始人数：${inits}` : ''}；下一位：${wname(nextWaiter())}`);
       save(); ui.tab = 'assign'; render();
     }
     /* ---------- 结束当前 / 恢复营业 ----------
@@ -1661,14 +1713,15 @@
        24 小时内、且还没开始新的营业时，可以在「今日上岗」页点「恢复营业」原样找回。 */
     const RESTORE_MS = 24 * 3600 * 1000;
     const restorable = () => !!S.lastEnded && Date.now() - S.lastEnded.at < RESTORE_MS;
-    function endDay() { if (needAdmin()) return;
+    function endDay() {
+      if (needAdmin()) return;
       const occ = S.onDuty.reduce((n, id) => n + activeOf(id), 0);
       if (!confirm(`结束当前营业？\n${occ ? `⚠ 还有 ${occ} 桌占位中。\n` : ''}结束后 24 小时内，可在「今日上岗」页点「恢复营业」找回当天数据。`)) return;
       const snapshot = JSON.parse(JSON.stringify({ onDuty: S.onDuty, records: S.records, history: S.history, log: S.log }));   // 结束前的完整状态
       const hadActivity = S.history.length > 0 || Object.values(S.records).some(r => r.items.length);
       const inShift = k => it => shiftOf(it.t) === k;
       addLog('end', `结束营业。
-全天：${summary()}
+全天：${summary(undefined, true)}
 ${SHIFT_NAME.morning}（${shiftRange('morning')}）：${summary(inShift('morning'))}
 ${SHIFT_NAME.evening}（${shiftRange('evening')}）：${summary(inShift('evening'))}`);
       const at = Date.now();
@@ -1676,10 +1729,11 @@ ${SHIFT_NAME.evening}（${shiftRange('evening')}）：${summary(inShift('evening
       S.logArchive = S.logArchive.slice(-60); // 最多保留 60 天
       // 如果这次结束的是一个空的营业（比如误点了开始又结束），不要盖掉之前还能恢复的那份
       if (hadActivity || !restorable()) S.lastEnded = { at, ...snapshot };
-      S.started = false; S.records = {}; S.history = []; S.onDuty = []; S.log = []; S.undoStack = []; S.redoStack = [];
+      S.started = false; S.records = {}; S.history = []; S.onDuty = []; S.initCounts = {}; S.log = []; S.undoStack = []; S.redoStack = [];
       save(); render();
     }
-    function restoreDay() { if (needAdmin()) return;
+    function restoreDay() {
+      if (needAdmin()) return;
       const e = S.lastEnded;
       if (!restorable() || S.started) return;
       if (!confirm(`恢复 ${fmtDate(e.at)} ${fmtTime(e.at)} 结束的营业？\n上岗顺序、每桌分配和日志都会原样恢复。`)) return;
