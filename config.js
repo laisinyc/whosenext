@@ -17,7 +17,7 @@ window.WHOSENEXT_CONFIG = {
     "Ava",
     "Wenjie",
     "Ge",
-    "Dadong",
+    "Jennifer",
     "Who"
   ],
 
