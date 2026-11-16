@@ -1667,8 +1667,8 @@
     </div>
     <label class="manual"><input type="checkbox" ${manualOn ? 'checked' : ''} onchange="toggleManual(this.checked)"> 设为共享桌（无论人数，只记桌号，不计人数）</label>
     <div class="hint" id="sizeHint" style="color:#1971c2">${sizeHintText()}</div>
-    ${admin && trainees.length ? `<div class="label hint">指派给（Training 不参与排序，只能前台手动指派）</div>
-    <div class="quick targets"><button class="${tgt ? '' : 'sel'}" onclick="pickTarget(null)">自动：${esc(wname(nid))}</button>${trainees.map(id => `<button class="${tgt === id ? 'sel' : ''}" onclick="pickTarget('${id}')">${esc(wname(id))} <small>Training</small></button>`).join('')}</div>` : ''}
+    ${admin && trainees.length ? `<div class="quick targets" style="margin-top:10px"><button class="${tgt ? '' : 'sel'}" onclick="pickTarget(null)">自动：${esc(wname(nid))}</button>${trainees.map(id => `<button class="${tgt === id ? 'sel' : ''}" onclick="pickTarget('${id}')">${esc(wname(id))} <small>Training</small></button>`).join('')}</div>
+    <div class="hint" style="margin-top:6px">Training 手动指派，不参与排序</div>` : ''}
     <div style="margin-top:12px"><button class="btn" id="assignBtn" style="width:100%" ${ready ? '' : 'disabled'} onclick="doAssign()">
       分配给 ${esc(wname(tgt || nid))}${tgt ? '（Training，不计人数）' : ''}</button></div>
   </div>
