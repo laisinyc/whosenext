@@ -1994,7 +1994,8 @@ ${SHIFT_NAME.evening}（${shiftRange('evening')}）：${summary(inShift('evening
   </div>`;
     }
     function pickTable(c) {   // 选桌后整页重绘，需保留「其他」输入框的内容
-      ui.table = c; render();
+      ui.table = ui.table === c ? null : c;      // 再点一次已选中的桌：取消选择
+      render();
     }
     function sizeHintText() {
       return ui.manual ? '已手动设为共享桌：只记录桌号，不计人数' : '';
