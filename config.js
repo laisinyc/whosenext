@@ -78,6 +78,10 @@ window.WHOSENEXT_CONFIG = {
     adminEmails: [],
   },
 
+  // Training 选项：只有这里列出的服务员（写名字，要和上面 waiters 里的一致）才会在「今日上岗」里出现“Training”勾选框。
+  // 勾选后该服务员不参与排序和计数，只能由前台手动指派桌次。留空 [] 或删掉整项 = 不显示这个选项。
+  trainingWaiters: ["Jennifer"],
+
   // 共享桌阈值：客人人数 大于 该值 时为共享桌（只记桌号，不计人数）
   shareThreshold: 7,
 

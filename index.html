@@ -1591,7 +1591,7 @@
       </label>
       ${on ? (locked ? (((S.records[w.id] || {}).training) ? `<div class="initrow"><span class="tag-train">Training</span> 不参与排序和计数，由前台手动指派</div>`
           : ((S.records[w.id] || {}).init) ? `<div class="initrow">初始人数：<b>${S.records[w.id].init}</b></div>` : '')
-        : `<div class="initrow"><label class="trainchk"><input type="checkbox" ${isTrainee(w.id) ? 'checked' : ''} ${ui.shuffling ? 'disabled' : ''} onchange="setTrainee('${w.id}',this.checked)"> Training</label>
+        : `<div class="initrow">${canTrain(w.id) ? `<label class="trainchk"><input type="checkbox" ${isTrainee(w.id) ? 'checked' : ''} ${ui.shuffling ? 'disabled' : ''} onchange="setTrainee('${w.id}',this.checked)"> Training</label>` : ''}
         ${isTrainee(w.id) ? '<span class="hint">不参与排序和计数，由前台手动指派</span>' : `初始人数
         <button class="step" ${ui.shuffling ? 'disabled' : ''} onclick="initStep('${w.id}',-1)">−</button>
         <input type="number" min="0" max="999" inputmode="numeric" value="${initOf(w.id)}" ${ui.shuffling ? 'disabled' : ''} onfocus="this.select()" oninput="setInit('${w.id}',this.value)">
@@ -1734,9 +1734,12 @@
       save();
     }
     // Training：不参与排序和计数，只能由前台手动指派桌次（开始营业前设置）
-    const isTrainee = id => !!(S.trainees && S.trainees[id]);
+    // 只有 config.js 的 trainingWaiters 里列出的服务员才有 Training 选项；没配置则整个功能不显示
+    const TRAINING_NAMES = (Array.isArray(CFG.trainingWaiters) ? CFG.trainingWaiters : []).map(n => String(n).trim()).filter(Boolean);
+    const canTrain = id => TRAINING_NAMES.includes(wname(id));
+    const isTrainee = id => canTrain(id) && !!(S.trainees && S.trainees[id]);
     const canStart = () => S.onDuty.some(id => !isTrainee(id));        // 至少要有一位正常参与排序的服务员
-    function setTrainee(id, on) { if (needAdmin() || S.started || ui.shuffling) return;
+    function setTrainee(id, on) { if (needAdmin() || S.started || ui.shuffling || !canTrain(id)) return;
       S.trainees = S.trainees || {}; if (on) S.trainees[id] = true; else delete S.trainees[id];
       save(); render();
     }
