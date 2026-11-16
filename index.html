@@ -1302,7 +1302,7 @@
       const e = ui.edit, t = S.tables.find(t => t.code === e.table);
       if (!e.size) return '请输入人数';
       if (e.manual) return `<span style="color:#1971c2">已手动设为共享桌：只记桌号，不计人数</span>`;
-      if (isShared(e.size)) return `<span style="color:#1971c2">人数 &gt; ${SHARE_THRESHOLD}：按共享桌处理，只记桌号，不计人数</span>`;
+      if (isShared(e.size)) return '';                       // 达到共享桌人数：勾选框已自动选中，不再额外提示，也不检查桌子容量
       if (t && e.size > t.cap) return `<span style="color:#e03131">${esc(t.code)} 最多坐 ${t.cap} 人</span>`;
       return `计入服务人数：${e.size} 人`;
     }
@@ -1344,7 +1344,7 @@
       <input type="number" min="1" value="${e.size || ''}" oninput="editTyping(this.value)">
       <button onclick="editStep(1)">+</button>
     </div>
-    <label class="manual"><input type="checkbox" ${e.manual || isShared(e.size) ? 'checked' : ''} ${isShared(e.size) ? 'disabled' : ''} onchange="editManual(this.checked)"> 设为共享桌（无论人数，只记桌号，不计人数）${isShared(e.size) ? `<small style="color:var(--mute)">人数 ≥ ${SHARE_THRESHOLD + 1}，自动选中</small>` : ''}</label>
+    <label class="manual"><input type="checkbox" ${e.manual || isShared(e.size) ? 'checked' : ''} ${isShared(e.size) ? 'disabled' : ''} onchange="editManual(this.checked)"> 设为共享桌（只记桌号，不计人数）${isShared(e.size) ? `<small style="color:var(--mute)">人数 ≥ ${SHARE_THRESHOLD + 1}，自动选中</small>` : ''}</label>
     ${calcShared(e.size, e.manual) ? `<div class="lbl">主服务员（共享桌可手动指定）</div>
     <div class="quick targets">${S.onDuty.filter(id => S.records[id]).map(id => `<button class="${e.waiterId === id ? 'sel' : ''}" onclick="editWaiter('${id}')">${esc(wname(id))}${S.records[id].training ? ' <small>Training</small>' : ''}</button>`).join('')}</div>
     <div class="lbl">辅助服务员（可多选，可不选；只做协助，不计人数）</div>
@@ -1691,8 +1691,8 @@
         ${on ? `<span class="badge">${idx + 1}</span>` : ''}
       </label>
       ${on ? (locked ? (((S.records[w.id] || {}).training) ? `<div class="initrow"><span class="tag-train">Training</span> 不参与排序和计数，由前台手动指派</div>`
-          : ((S.records[w.id] || {}).init) ? `<div class="initrow">初始人数：<b>${S.records[w.id].init}</b></div>` : '')
-        : `<div class="initrow">${canTrain(w.id) ? `<label class="trainchk"><input type="checkbox" ${isTrainee(w.id) ? 'checked' : ''} ${ui.shuffling ? 'disabled' : ''} onchange="setTrainee('${w.id}',this.checked)"> Training</label>` : ''}
+            : ((S.records[w.id] || {}).init) ? `<div class="initrow">初始人数：<b>${S.records[w.id].init}</b></div>` : '')
+            : `<div class="initrow">${canTrain(w.id) ? `<label class="trainchk"><input type="checkbox" ${isTrainee(w.id) ? 'checked' : ''} ${ui.shuffling ? 'disabled' : ''} onchange="setTrainee('${w.id}',this.checked)"> Training</label>` : ''}
         ${isTrainee(w.id) ? '<span class="hint">不参与排序和计数，由前台手动指派</span>' : `初始人数
         <button class="step" ${ui.shuffling ? 'disabled' : ''} onclick="initStep('${w.id}',-1)">−</button>
         <input type="number" min="0" max="999" inputmode="numeric" value="${initOf(w.id)}" ${ui.shuffling ? 'disabled' : ''} onfocus="this.select()" oninput="setInit('${w.id}',this.value)">
@@ -1843,7 +1843,8 @@
 
     // 初始人数：开始营业前给每位服务员手动设置“已经服务的人数”（默认 0），计入人数统计和轮转
     const initOf = id => (S.initCounts && S.initCounts[id]) || 0;
-    function setInit(id, v) { if (needAdmin() || S.started) return;
+    function setInit(id, v) {
+      if (needAdmin() || S.started) return;
       const n = Math.max(0, Math.min(999, parseInt(v, 10) || 0));
       S.initCounts = S.initCounts || {}; S.initCounts[id] = n;
       save();
@@ -1855,7 +1856,8 @@
     // 默认选中：除非前台手动取消勾选（记为 false）
     const isTrainee = id => canTrain(id) && !(S.trainees && S.trainees[id] === false);
     const canStart = () => S.onDuty.some(id => !isTrainee(id));        // 至少要有一位正常参与排序的服务员
-    function setTrainee(id, on) { if (needAdmin() || S.started || ui.shuffling || !canTrain(id)) return;
+    function setTrainee(id, on) {
+      if (needAdmin() || S.started || ui.shuffling || !canTrain(id)) return;
       S.trainees = S.trainees || {}; S.trainees[id] = !!on;
       save(); render();
     }
@@ -1961,8 +1963,7 @@ ${SHIFT_NAME.evening}（${shiftRange('evening')}）：${summary(inShift('evening
       ui.table = c; render();
     }
     function sizeHintText() {
-      return ui.manual ? '已手动设为共享桌：只记录桌号，不计人数'
-        : ui.size > SHARE_THRESHOLD ? `人数 &gt; ${SHARE_THRESHOLD}：共享桌，只记录桌号，不计人数` : '';
+      return ui.manual ? '已手动设为共享桌：只记录桌号，不计人数' : '';
     }
     function pickTarget(id) { ui.target = id; ui.helpers = (ui.helpers || []).filter(h => h !== id); render(); }
     function pickHelper(id) { const h = ui.helpers || (ui.helpers = []), i = h.indexOf(id); if (i >= 0) h.splice(i, 1); else h.push(id); render(); }
