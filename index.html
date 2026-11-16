@@ -191,7 +191,42 @@
       color: var(--mute);
     }
 
-    .initrow input {
+    .quick.targets button {
+      width: auto;
+      min-width: 0;
+      padding: 0 14px;
+      white-space: nowrap;
+    }
+
+    .quick.targets button small {
+      color: inherit;
+      opacity: .75;
+    }
+
+    .trainchk {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-right: 6px;
+      color: #5f3dc4;
+      font-weight: 600;
+    }
+
+    .trainchk input {
+      width: 18px;
+      height: 18px;
+    }
+
+    .tag-train {
+      padding: 1px 8px;
+      border-radius: 10px;
+      background: #f3f0ff;
+      color: #5f3dc4;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .initrow input[type=number] {
       width: 64px;
       padding: 6px;
       text-align: center;
@@ -857,7 +892,7 @@
       if (!confirm('用 config.js 覆盖当前的服务员和餐桌列表？')) return;
       applyConfig(); save(); render();
     }
-    let ui = { tab: null, table: null, size: null, custom: '', manual: false, edit: null, release: null, pick: false, alert: null };
+    let ui = { tab: null, table: null, size: null, custom: '', manual: false, target: null, edit: null, release: null, pick: false, alert: null };
 
     function load() {
       try {
@@ -897,6 +932,7 @@
     function nextWaiter() {
       let best = null;
       for (const id of S.onDuty) {            // onDuty 本身就是初始化顺序
+        if (S.records[id].training) continue;  // Training：不参与排序，只能由前台手动指派
         const c = S.records[id].count;
         if (best === null || c < S.records[best].count) best = id; // 严格小于 => 平局保留靠前者
       }
@@ -926,7 +962,7 @@
     // 当前占位（未释放）的桌数
     const activeOf = id => S.records[id].items.filter(it => !it.released).length;
     // 共享桌只留记录，不计入人数；这里单独标出共享桌数量
-    const standings = () => S.onDuty.map(id => `${wname(id)} ${S.records[id].count}人/${S.records[id].items.length}桌/占位${activeOf(id)}` + (sharedOf(id).length ? `(含共享${sharedOf(id).length}桌)` : '')).join(' | ');
+    const standings = () => S.onDuty.map(id => S.records[id].training ? `${wname(id)}(Training) ${S.records[id].items.length}桌/占位${activeOf(id)}` : `${wname(id)} ${S.records[id].count}人/${S.records[id].items.length}桌/占位${activeOf(id)}` + (sharedOf(id).length ? `(含共享${sharedOf(id).length}桌)` : '')).join(' | ');
     /* 每条日志记录操作人（前台 / 服务员名字）和操作设备的 IP 及大致位置。
        IP 和位置由浏览器向 ipwho.is 查询（按 IP 估算到城市级别，不是精确地址；查不到时只记操作人）；
        config.js 里设 logClientIp: false 可关闭。 */
@@ -957,6 +993,7 @@
         const n = normal.reduce((a, it) => a + it.size, 0);
         const tb = normal.map(it => `${it.table}(${it.size}人)`).join('、') || '无';
         const sh = items.filter(it => it.shared).map(it => `${it.table}(${it.size}人${it.manual ? '，手动' : ''})`).join('、');
+        if (S.records[id].training) return `${i + 1}.${wname(id)}(Training，不参与排序、不计人数) ${items.length}桌，桌号：${items.map(it => `${it.table}(${it.size}人)`).join('、') || '无'}`;
         const init = withInit ? (S.records[id].init || 0) : 0;
         return `${i + 1}.${wname(id)} 共${n + init}人${init ? `（含初始${init}人）` : ''}，${items.length}桌，桌号：${tb}` + (sh ? `；共享桌(不计人数)：${sh}` : '');
       }).join('；');
@@ -985,7 +1022,7 @@
     function recount() {
       for (const id in S.records) {
         const r = S.records[id];
-        r.count = (r.init || 0) + r.items.reduce((n, it) => n + (it.shared ? 0 : it.size), 0);
+        r.count = r.training ? 0 : (r.init || 0) + r.items.reduce((n, it) => n + (it.shared ? 0 : it.size), 0);
       }
     }
     function findItem(id) {
@@ -1025,17 +1062,18 @@
       save();
     }
 
-    function assign(table, size, manual) {
-      const id = nextWaiter();
+    // target：前台手动指派给某位服务员（用于 Training）；不传则按排序分给下一位
+    function assign(table, size, manual, target) {
+      const id = target && S.records[target] ? target : nextWaiter();
       if (!id) return;
-      pushUndo(`分配 ${table} ${size}人 → ${wname(id)}`);
+      pushUndo(`分配 ${table} ${size}人 → ${wname(id)}${S.records[id].training ? '（Training）' : ''}`);
       const r = S.records[id], before = r.count;
       const item = { id: uid(), table, size, shared: calcShared(size, manual), t: Date.now() };
       if (manual) item.manual = true;
       r.items.push(item);
       S.history.push({ id: item.id, waiterId: id, time: Date.now() });
       recount();
-      addLog('assign', `${descItem(item)} → ${wname(id)}（${before} → ${r.count} 人）；下一位：${wname(nextWaiter())}`, true);
+      addLog('assign', `${descItem(item)} → ${wname(id)}（${r.training ? 'Training，前台手动指派，不参与排序、不计人数' : `${before} → ${r.count} 人`}）；下一位：${wname(nextWaiter())}`, true);
       save();
     }
 
@@ -1274,7 +1312,7 @@
       } catch (e) { }
       try {                                                // 页面在后台时，用系统通知（需要用户已允许）
         if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
-          const title = `${w.name}：新分配`, opts = { body: `${text}（累计 ${r.count} 人 · ${r.items.length} 桌）`, tag: 'whosenext-assign', renotify: true, vibrate: [200, 100, 200], icon: 'icons/icon-192.png' };
+          const title = `${w.name}：新分配`, opts = { body: `${text}（${r.training ? 'Training，不计人数' : `累计 ${r.count} 人`} · ${r.items.length} 桌）`, tag: 'whosenext-assign', renotify: true, vibrate: [200, 100, 200], icon: 'icons/icon-192.png' };
           if (navigator.serviceWorker) navigator.serviceWorker.ready.then(reg => reg.showNotification(title, opts)).catch(() => new Notification(title, opts));
           else new Notification(title, opts);
         }
@@ -1295,7 +1333,7 @@
       return `<div class="mask"><div class="modal alert">
     <h3>🔔 ${esc(w ? w.name : '')}，你有新分配</h3>
     ${list.map(a => `<div class="al ${a.shared ? 'share' : ''}"><b>${esc(a.table)}</b><span>${a.shared ? (a.manual ? '手动共享桌 ' : '共享桌 ') + a.size + ' 人<small>（不计人数）</small>' : a.size + ' 人'}${a.upd ? '<small>（已修改）</small>' : ''}</span><em>${fmtTime(a.t)}</em></div>`).join('')}
-    ${r ? `<div class="hint">你目前累计：${r.count} 人 · ${r.items.length} 桌 · 占位 ${activeOf(w.id)} 桌</div>` : ''}
+    ${r ? `<div class="hint">${r.training ? `你是 Training（不计人数）· ${r.items.length} 桌 · 占位 ${activeOf(w.id)} 桌` : `你目前累计：${r.count} 人 · ${r.items.length} 桌 · 占位 ${activeOf(w.id)} 桌`}</div>` : ''}
     <div class="actions"><button class="btn" onclick="ackAlert()">我知道了</button></div>
   </div></div>`;
     }
@@ -1308,7 +1346,7 @@
       return `<div class="card mine">
     <div class="label">我的最新分配 · ${esc(w.name)}</div>
     <div class="big">${last ? `${esc(last.table)} <span>${last.shared ? shareLabel(last) + ' ' + last.size + ' 人(不计)' : last.size + ' 人'}</span> <small>${fmtTime(last.t)}${last.released ? ' · 已释放' : ''}</small>` : '<span class="hint">还没有分配</span>'}</div>
-    <div class="hint">累计 ${r.count} 人 · ${r.items.length} 桌 · 占位 ${activeOf(w.id)} 桌</div>${notif}
+    <div class="hint">${r.training ? `Training（不计人数）· ${r.items.length} 桌` : `累计 ${r.count} 人 · ${r.items.length} 桌`} · 占位 ${activeOf(w.id)} 桌</div>${notif}
   </div>`;
     }
 
@@ -1551,18 +1589,21 @@
         <button class="mini" style="color:#444" ${idx === S.onDuty.length - 1 || ui.shuffling ? 'disabled' : ''} onclick="moveDuty('${w.id}',1)">下移</button>` : ''}
         ${on ? `<span class="badge">${idx + 1}</span>` : ''}
       </label>
-      ${on ? (locked ? (((S.records[w.id] || {}).init) ? `<div class="initrow">初始人数：<b>${S.records[w.id].init}</b></div>` : '')
-        : `<div class="initrow">初始人数
+      ${on ? (locked ? (((S.records[w.id] || {}).training) ? `<div class="initrow"><span class="tag-train">Training</span> 不参与排序和计数，由前台手动指派</div>`
+          : ((S.records[w.id] || {}).init) ? `<div class="initrow">初始人数：<b>${S.records[w.id].init}</b></div>` : '')
+        : `<div class="initrow"><label class="trainchk"><input type="checkbox" ${isTrainee(w.id) ? 'checked' : ''} ${ui.shuffling ? 'disabled' : ''} onchange="setTrainee('${w.id}',this.checked)"> Training</label>
+        ${isTrainee(w.id) ? '<span class="hint">不参与排序和计数，由前台手动指派</span>' : `初始人数
         <button class="step" ${ui.shuffling ? 'disabled' : ''} onclick="initStep('${w.id}',-1)">−</button>
         <input type="number" min="0" max="999" inputmode="numeric" value="${initOf(w.id)}" ${ui.shuffling ? 'disabled' : ''} onfocus="this.select()" oninput="setInit('${w.id}',this.value)">
-        <button class="step" ${ui.shuffling ? 'disabled' : ''} onclick="initStep('${w.id}',1)">+</button></div>`) : ''}
+        <button class="step" ${ui.shuffling ? 'disabled' : ''} onclick="initStep('${w.id}',1)">+</button>`}</div>`) : ''}
       </div>`;
       }).join('')}
     <div style="margin-top:12px" class="row">
       ${locked
           ? `<button class="btn red" onclick="endDay()">结束当前 / 重新开始</button>`
-          : `<button class="btn" ${S.onDuty.length && !ui.shuffling ? '' : 'disabled'} onclick="startDay()">开始营业（${S.onDuty.length} 人）</button>`}
+          : `<button class="btn" ${canStart() && !ui.shuffling ? '' : 'disabled'} onclick="startDay()">开始营业（${S.onDuty.length} 人）</button>`}
     </div>
+    ${!locked && S.onDuty.length && !canStart() ? '<div class="hint" style="margin-top:6px;color:#e03131">至少要有一位不是 Training 的服务员</div>' : ''}
   </div>`;
     }
 
@@ -1596,6 +1637,8 @@
       }
       const nid = nextWaiter();
       const shared = ui.size > SHARE_THRESHOLD, manualOn = ui.manual;
+      const trainees = S.onDuty.filter(id => S.records[id] && S.records[id].training);
+      const tgt = trainees.includes(ui.target) ? ui.target : null;
       const ready = ui.table && ui.size >= 1;
       return `
   ${myCard()}
@@ -1624,8 +1667,10 @@
     </div>
     <label class="manual"><input type="checkbox" ${manualOn ? 'checked' : ''} onchange="toggleManual(this.checked)"> 设为共享桌（无论人数，只记桌号，不计人数）</label>
     <div class="hint" id="sizeHint" style="color:#1971c2">${sizeHintText()}</div>
+    ${admin && trainees.length ? `<div class="label hint">指派给（Training 不参与排序，只能前台手动指派）</div>
+    <div class="quick targets"><button class="${tgt ? '' : 'sel'}" onclick="pickTarget(null)">自动：${esc(wname(nid))}</button>${trainees.map(id => `<button class="${tgt === id ? 'sel' : ''}" onclick="pickTarget('${id}')">${esc(wname(id))} <small>Training</small></button>`).join('')}</div>` : ''}
     <div style="margin-top:12px"><button class="btn" id="assignBtn" style="width:100%" ${ready ? '' : 'disabled'} onclick="doAssign()">
-      分配给 ${esc(wname(nid))}</button></div>
+      分配给 ${esc(wname(tgt || nid))}${tgt ? '（Training，不计人数）' : ''}</button></div>
   </div>
 
   <div class="card board">
@@ -1634,10 +1679,10 @@
           const r = S.records[id];
           return `<div class="w ${id === nid ? 'is-next' : ''}">
         <span class="badge">${i + 1}</span>
-        <div class="info"><b>${esc(wname(id))}</b> ${id === nid ? '<span class="chip">下一位</span>' : ''}
+        <div class="info"><b>${esc(wname(id))}</b> ${r.training ? '<span class="tag-train">Training</span>' : id === nid ? '<span class="chip">下一位</span>' : ''}
           <div>${r.items.map(it => `<button class="chip editable ${it.shared ? 'share' : ''} ${it.released ? 'released' : ''}" title="${it.released ? '已释放' : '占位中'}" onclick="openEdit('${it.id}')">${esc(it.table)}${it.shared ? (it.manual ? ' 手动共享·' : ' 共享·') + it.size + '人(不计)' : '·' + it.size + '人'}</button>`).join('') || '<span class="hint">暂无</span>'}</div>
         </div>
-        <div class="cnt">${r.count}<small> 人</small> <span style="color:#555">${r.items.length}</span><small> 桌</small><div class="hint" style="font-size:12px;font-weight:600;color:${activeOf(id) ? '#c92a2a' : '#868e96'}">占位 ${activeOf(id)} 桌</div>${r.init ? `<div class="hint" style="font-size:12px;font-weight:400;color:#868e96">含初始 ${r.init} 人</div>` : ''}${sharedOf(id).length ? `<div class="hint" style="font-size:12px;font-weight:400;color:#1971c2">含共享 ${sharedOf(id).length} 桌</div>` : ''}</div>
+        <div class="cnt">${r.training ? '<small style="color:#5f3dc4">不计人数</small>' : `${r.count}<small> 人</small>`} <span style="color:#555">${r.items.length}</span><small> 桌</small><div class="hint" style="font-size:12px;font-weight:600;color:${activeOf(id) ? '#c92a2a' : '#868e96'}">占位 ${activeOf(id)} 桌</div>${r.init ? `<div class="hint" style="font-size:12px;font-weight:400;color:#868e96">含初始 ${r.init} 人</div>` : ''}${sharedOf(id).length ? `<div class="hint" style="font-size:12px;font-weight:400;color:#1971c2">含共享 ${sharedOf(id).length} 桌</div>` : ''}</div>
       </div>`;
         }).join('')}
   </div>
@@ -1688,6 +1733,13 @@
       S.initCounts = S.initCounts || {}; S.initCounts[id] = n;
       save();
     }
+    // Training：不参与排序和计数，只能由前台手动指派桌次（开始营业前设置）
+    const isTrainee = id => !!(S.trainees && S.trainees[id]);
+    const canStart = () => S.onDuty.some(id => !isTrainee(id));        // 至少要有一位正常参与排序的服务员
+    function setTrainee(id, on) { if (needAdmin() || S.started || ui.shuffling) return;
+      S.trainees = S.trainees || {}; if (on) S.trainees[id] = true; else delete S.trainees[id];
+      save(); render();
+    }
     function initStep(id, d) { if (needAdmin() || S.started || ui.shuffling) return; setInit(id, initOf(id) + d); render(); }
     function toggleDuty(id) {
       if (needAdmin() || ui.shuffling) return;
@@ -1729,12 +1781,13 @@
       save(); render();
     }
     function startDay() {
-      if (needAdmin() || ui.shuffling) return;
+      if (needAdmin() || ui.shuffling || !canStart()) return;
       S.records = {}; S.history = []; S.log = []; S.undoStack = []; S.redoStack = [];
-      S.onDuty.forEach(id => { const n = initOf(id); S.records[id] = { count: n, init: n, items: [] }; });
+      S.onDuty.forEach(id => { const tr = isTrainee(id), n = tr ? 0 : initOf(id); S.records[id] = { count: n, init: n, items: [] }; if (tr) S.records[id].training = true; });
       S.started = true;
-      const inits = S.onDuty.filter(id => initOf(id) > 0).map(id => `${wname(id)} ${initOf(id)}人`).join('、');
-      addLog('start', `开始营业，上岗顺序：${S.onDuty.map((id, i) => `${i + 1}.${wname(id)}`).join(' ')}${inits ? `；初始人数：${inits}` : ''}；下一位：${wname(nextWaiter())}`);
+      const trainees = S.onDuty.filter(isTrainee).map(wname).join('、');
+      const inits = S.onDuty.filter(id => !isTrainee(id) && initOf(id) > 0).map(id => `${wname(id)} ${initOf(id)}人`).join('、');
+      addLog('start', `开始营业，上岗顺序：${S.onDuty.map((id, i) => `${i + 1}.${wname(id)}`).join(' ')}${inits ? `；初始人数：${inits}` : ''}${trainees ? `；Training（不参与排序和计数，由前台手动指派）：${trainees}` : ''}；下一位：${wname(nextWaiter())}`);
       save(); ui.tab = 'assign'; render();
     }
     /* ---------- 结束当前 / 恢复营业 ----------
@@ -1758,7 +1811,7 @@ ${SHIFT_NAME.evening}（${shiftRange('evening')}）：${summary(inShift('evening
       S.logArchive = S.logArchive.slice(-60); // 最多保留 60 天
       // 如果这次结束的是一个空的营业（比如误点了开始又结束），不要盖掉之前还能恢复的那份
       if (hadActivity || !restorable()) S.lastEnded = { at, ...snapshot };
-      S.started = false; S.records = {}; S.history = []; S.onDuty = []; S.initCounts = {}; S.log = []; S.undoStack = []; S.redoStack = [];
+      S.started = false; S.records = {}; S.history = []; S.onDuty = []; S.initCounts = {}; S.trainees = {}; S.log = []; S.undoStack = []; S.redoStack = [];
       save(); render();
     }
     function restoreDay() {
@@ -1792,6 +1845,7 @@ ${SHIFT_NAME.evening}（${shiftRange('evening')}）：${summary(inShift('evening
       return ui.manual ? '已手动设为共享桌：只记录桌号，不计人数'
         : ui.size > SHARE_THRESHOLD ? `人数 &gt; ${SHARE_THRESHOLD}：共享桌，只记录桌号，不计人数` : '';
     }
+    function pickTarget(id) { ui.target = id; render(); }
     function toggleManual(on) { ui.manual = on; document.getElementById('sizeHint').innerHTML = sizeHintText(); }
     function pickSize(n) { ui.size = n; ui.custom = ''; render(); }
     // 「其他」输入框：只改局部元素，不整页重绘，所以不会丢焦点或清空输入
@@ -1810,8 +1864,8 @@ ${SHIFT_NAME.evening}（${shiftRange('evening')}）：${summary(inShift('evening
       const t = S.tables.find(t => t.code === ui.table);
       if (t && !ui.manual && ui.size > t.cap && ui.size <= SHARE_THRESHOLD &&
         !confirm(`${t.code} 最多坐 ${t.cap} 人，当前 ${ui.size} 人，仍要分配吗？`)) return;
-      assign(ui.table, ui.size, ui.manual);
-      ui.table = null; ui.size = null; ui.custom = ''; ui.manual = false; render();
+      assign(ui.table, ui.size, ui.manual, admin ? ui.target : null);
+      ui.table = null; ui.size = null; ui.custom = ''; ui.manual = false; ui.target = null; render();
     }
     function doUndo() { undo(); render(); }
     function doRedo() { redo(); render(); }
