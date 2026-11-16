@@ -212,12 +212,16 @@
     }
 
     .trainhead {
-      display: flex;
-      align-items: center;
-      gap: 8px;
       font-size: 13px;
       color: #5f3dc4;
       font-weight: 600;
+    }
+
+    .trainhead small {
+      margin-left: 8px;
+      font-size: 12px;
+      font-weight: 400;
+      color: var(--mute);
     }
 
     .trainbox .quick {
@@ -1827,9 +1831,8 @@
     <div style="margin-top:12px"><button class="btn" id="assignBtn" style="width:100%" ${ready ? '' : 'disabled'} onclick="doAssign()">
       分配给 ${esc(wname(mainSel))}${tgt && S.records[tgt].training ? '（Training，不计人数）' : ''}${helpersSel.length ? ' + 辅助 ' + helpersSel.map(wname).join('、') : ''}</button></div>
     ${admin && trainees.length ? `<div class="trainbox">
-      <div class="trainhead">Training 手动指派，不参与排序</div>
+      <div class="trainhead">Training 手动指派，不参与排序<small>点名字选中，再点一次取消；选中后分配给 TA，不计人数</small></div>
       <div class="quick targets">${trainees.map(id => `<button class="${tgt === id ? 'sel' : ''}" onclick="pickTarget(${tgt === id ? 'null' : `'${id}'`})">${esc(wname(id))}</button>`).join('')}</div>
-      <div class="hint" style="margin-top:4px">点名字选中，再点一次取消；选中后分配给 TA，不计人数</div>
     </div>` : ''}
   </div>
 
