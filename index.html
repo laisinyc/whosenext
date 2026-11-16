@@ -1474,6 +1474,7 @@
     let lastStateJson = '', lastArchiveJson = '', pushTimer = null, unsubArchive = null;
 
     const sharedState = () => { const { logArchive, undoStack, redoStack, ...rest } = S; return rest; };
+    const stable = v => JSON.stringify(v, (k, x) => x && typeof x === 'object' && !Array.isArray(x) ? Object.keys(x).sort().reduce((o, key) => (o[key] = x[key], o), {}) : x);   // 键顺序无关的比较
     const isDirty = () => localStorage.getItem(DIRTY_KEY) === '1';
 
     function schedulePush() {
@@ -1514,6 +1515,8 @@
       if (val.by === CLIENT_ID) { lastStateJson = val.v; return renderHeader(); }   // 自己写的回声，忽略
       if (admin && isDirty()) { schedulePush(); return render(); }                           // 本机有没上传的改动，以本机为准
       let d; try { d = JSON.parse(val.v); } catch (e) { return; }
+      // 云端数据和本机一模一样（比如刷新后第一次收到、或自己上次写的）：保留本机的撤销 / 重做记录，不要清空
+      if (stable(d) === stable(sharedState())) { lastStateJson = val.v; return render(); }
       S = Object.assign({}, d, { logArchive: S.logArchive || [], undoStack: [], redoStack: [] });
       recount();
       lastStateJson = val.v;
