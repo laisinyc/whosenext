@@ -1073,7 +1073,7 @@
       r.items.push(item);
       S.history.push({ id: item.id, waiterId: id, time: Date.now() });
       recount();
-      addLog('assign', `${descItem(item)} → ${wname(id)}（${r.training ? 'Training，前台手动指派，不参与排序、不计人数' : `${before} → ${r.count} 人`}）；下一位：${wname(nextWaiter())}`, true);
+      addLog('assign', `${descItem(item)} → ${wname(id)}（${r.training ? 'Training，前台手动指派，不参与排序、不计人数' : target && item.shared ? `前台手动指定服务员，共享桌不计人数，${before} → ${r.count} 人` : `${before} → ${r.count} 人`}）；下一位：${wname(nextWaiter())}`, true);
       save();
     }
 
@@ -1091,15 +1091,23 @@
     }
 
     // 客人换桌 / 临时加减人：服务员不变，重新计算人数（可能跨过共享桌阈值）
-    function editEntry(id, table, size, manual) {
+    // newWaiter：只有共享桌可以改指定服务员（普通桌按排序规则，不能随意转给别人）
+    function editEntry(id, table, size, manual, newWaiter) {
       const f = findItem(id);
       if (!f) return;
       const before = f.r.count, old = descItem(f.item);
       pushUndo(`修改 ${wname(f.waiterId)} 的 ${old}`);
       f.item.table = table; f.item.size = size; f.item.shared = calcShared(size, manual);
       if (manual) f.item.manual = true; else delete f.item.manual;
+      let moved = '';
+      if (f.item.shared && newWaiter && newWaiter !== f.waiterId && S.records[newWaiter]) {
+        f.r.items.splice(f.r.items.indexOf(f.item), 1);
+        S.records[newWaiter].items.push(f.item);
+        S.history.forEach(h => { if (h.id === id) h.waiterId = newWaiter; });
+        moved = `；共享桌改由 ${wname(newWaiter)} 负责（原：${wname(f.waiterId)}，前台手动指定）`;
+      }
       recount();
-      addLog('edit', `修改：${wname(f.waiterId)} 的 ${old} → ${descItem(f.item)}（${before} → ${f.r.count} 人）；下一位：${wname(nextWaiter())}`, true);
+      addLog('edit', `修改：${wname(f.waiterId)} 的 ${old} → ${descItem(f.item)}${moved ? moved : `（${before} → ${f.r.count} 人）`}；下一位：${wname(nextWaiter())}`, true);
       save();
     }
 
@@ -1184,7 +1192,7 @@
     function openEdit(id) {
       const f = findItem(id);
       if (!f) return;
-      ui.edit = { id, table: f.item.table, origTable: f.item.table, size: f.item.size, manual: !!f.item.manual };
+      ui.edit = { id, table: f.item.table, origTable: f.item.table, size: f.item.size, manual: !!f.item.manual, waiterId: f.waiterId };
       render();
     }
     function closeEdit() { ui.edit = null; render(); }
@@ -1194,11 +1202,19 @@
       return f && !f.item.released && occupantOf(c, ui.edit.id);
     }
     function editPick(i) { const c = editCodes()[i]; if (editConflict(c)) return; ui.edit.table = c; render(); }
+    function editWaiter(id) { ui.edit.waiterId = id; render(); }
     function editManual(on) { ui.edit.manual = on; render(); }
     function editStep(d) { ui.edit.size = Math.max(1, (ui.edit.size || 0) + d); render(); }
     function editTyping(v) {            // 打字时不整页重绘，避免丢焦点
       const n = parseInt(v, 10);
+      const wasShared = calcShared(ui.edit.size, ui.edit.manual);
       ui.edit.size = n >= 1 ? n : null;
+      if (wasShared !== calcShared(ui.edit.size, ui.edit.manual)) {          // 跨过共享桌阈值：显示 / 隐藏“指定服务员”，保留输入框焦点
+        const pos = document.activeElement && document.activeElement.selectionStart;
+        render();
+        const inp = document.querySelector('.modal .stepper input'); if (inp) { inp.focus(); try { inp.setSelectionRange(pos, pos); } catch (e) { } }
+        return;
+      }
       document.getElementById('editHint').innerHTML = editHint();
       document.getElementById('editSave').disabled = !ui.edit.size;
     }
@@ -1216,7 +1232,7 @@
       if (editConflict(e.table)) return alert(`${e.table} 已被占位，请先释放或选择其他桌`);
       if (t && !calcShared(e.size, e.manual) && e.size > t.cap &&
         !confirm(`${t.code} 最多坐 ${t.cap} 人，当前 ${e.size} 人，仍要保存吗？`)) return;
-      editEntry(e.id, e.table, e.size, e.manual);
+      editEntry(e.id, e.table, e.size, e.manual, e.waiterId);
       closeEdit();
     }
     function deleteEdit() {
@@ -1235,7 +1251,7 @@
       if (!f) { ui.edit = null; return ''; }
       return `<div class="mask" onclick="if(event.target===this)closeEdit()"><div class="modal">
     <h3>修改分配</h3>
-    <div class="hint">服务员：<b>${esc(wname(f.waiterId))}</b>（换桌或加减人不会更换服务员）</div>
+    <div class="hint">服务员：<b>${esc(wname(f.waiterId))}</b>（换桌或加减人不会更换服务员；共享桌可在下方改指定）</div>
     <div class="lbl">餐桌</div>
     ${layoutGrid(editCodes().map((c, i) => ({ code: c, i })), it => {
         const c = it.code, t = S.tables.find(t => t.code === c);
@@ -1249,6 +1265,8 @@
       <button onclick="editStep(1)">+</button>
     </div>
     <label class="manual"><input type="checkbox" ${e.manual ? 'checked' : ''} onchange="editManual(this.checked)"> 设为共享桌（无论人数，只记桌号，不计人数）</label>
+    ${calcShared(e.size, e.manual) ? `<div class="lbl">负责的服务员（共享桌可手动指定）</div>
+    <div class="quick targets">${S.onDuty.filter(id => S.records[id]).map(id => `<button class="${e.waiterId === id ? 'sel' : ''}" onclick="editWaiter('${id}')">${esc(wname(id))}${S.records[id].training ? ' <small>Training</small>' : ''}</button>`).join('')}</div>` : ''}
     <div class="hint" id="editHint" style="margin-top:8px">${editHint()}</div>
     <div class="actions">
       <button class="btn red" onclick="deleteEdit()" style="flex:0 0 auto">删除</button>
@@ -1638,7 +1656,9 @@
       const nid = nextWaiter();
       const shared = ui.size > SHARE_THRESHOLD, manualOn = ui.manual;
       const trainees = S.onDuty.filter(id => S.records[id] && S.records[id].training);
-      const tgt = trainees.includes(ui.target) ? ui.target : null;
+      const sharedNow = manualOn || shared;                                  // 共享桌：可以手动指定任意在岗服务员
+      const targets = sharedNow ? S.onDuty.filter(id => S.records[id]) : trainees;
+      const tgt = targets.includes(ui.target) ? ui.target : null;
       const ready = ui.table && ui.size >= 1;
       return `
   ${myCard()}
@@ -1667,10 +1687,10 @@
     </div>
     <label class="manual"><input type="checkbox" ${manualOn ? 'checked' : ''} onchange="toggleManual(this.checked)"> 设为共享桌（无论人数，只记桌号，不计人数）</label>
     <div class="hint" id="sizeHint" style="color:#1971c2">${sizeHintText()}</div>
-    ${admin && trainees.length ? `<div class="quick targets" style="margin-top:10px"><button class="${tgt ? '' : 'sel'}" onclick="pickTarget(null)">自动：${esc(wname(nid))}</button>${trainees.map(id => `<button class="${tgt === id ? 'sel' : ''}" onclick="pickTarget('${id}')">${esc(wname(id))} <small>Training</small></button>`).join('')}</div>
-    <div class="hint" style="margin-top:6px">Training 手动指派，不参与排序</div>` : ''}
+    ${admin && targets.length ? `<div class="quick targets" style="margin-top:10px"><button class="${tgt ? '' : 'sel'}" onclick="pickTarget(null)">自动：${esc(wname(nid))}</button>${targets.map(id => `<button class="${tgt === id ? 'sel' : ''}" onclick="pickTarget('${id}')">${esc(wname(id))}${S.records[id].training ? ' <small>Training</small>' : ''}</button>`).join('')}</div>
+    <div class="hint" style="margin-top:6px">${[sharedNow ? '共享桌可手动指定服务员' : '', trainees.length ? 'Training 手动指派，不参与排序' : ''].filter(Boolean).join('；')}</div>` : ''}
     <div style="margin-top:12px"><button class="btn" id="assignBtn" style="width:100%" ${ready ? '' : 'disabled'} onclick="doAssign()">
-      分配给 ${esc(wname(tgt || nid))}${tgt ? '（Training，不计人数）' : ''}</button></div>
+      分配给 ${esc(wname(tgt || nid))}${tgt && S.records[tgt].training ? '（Training，不计人数）' : ''}</button></div>
   </div>
 
   <div class="card board">
@@ -1850,7 +1870,7 @@ ${SHIFT_NAME.evening}（${shiftRange('evening')}）：${summary(inShift('evening
         : ui.size > SHARE_THRESHOLD ? `人数 &gt; ${SHARE_THRESHOLD}：共享桌，只记录桌号，不计人数` : '';
     }
     function pickTarget(id) { ui.target = id; render(); }
-    function toggleManual(on) { ui.manual = on; document.getElementById('sizeHint').innerHTML = sizeHintText(); }
+    function toggleManual(on) { ui.manual = on; render(); }
     function pickSize(n) { ui.size = n; ui.custom = ''; render(); }
     // 「其他」输入框：只改局部元素，不整页重绘，所以不会丢焦点或清空输入
     function typeSize(inp) {
