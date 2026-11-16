@@ -191,6 +191,28 @@
       color: var(--mute);
     }
 
+    .chip.helper {
+      background: #edf2ff;
+      color: #364fc7;
+      border: 1px dashed #748ffc;
+    }
+
+    b.rk {
+      display: inline-block;
+      margin-right: 4px;
+      padding: 0 5px;
+      border-radius: 4px;
+      background: #364fc7;
+      color: #fff;
+      font-size: 11px;
+      font-weight: 600;
+      line-height: 16px;
+    }
+
+    .chip.helper b.rk {
+      background: #748ffc;
+    }
+
     .quick.targets button {
       width: auto;
       min-width: 0;
@@ -892,7 +914,7 @@
       if (!confirm('用 config.js 覆盖当前的服务员和餐桌列表？')) return;
       applyConfig(); save(); render();
     }
-    let ui = { tab: null, table: null, size: null, custom: '', manual: false, target: null, edit: null, release: null, pick: false, alert: null };
+    let ui = { tab: null, table: null, size: null, custom: '', manual: false, target: null, helpers: [], edit: null, release: null, pick: false, alert: null };
 
     function load() {
       try {
@@ -992,10 +1014,11 @@
         const normal = items.filter(it => !it.shared);
         const n = normal.reduce((a, it) => a + it.size, 0);
         const tb = normal.map(it => `${it.table}(${it.size}人)`).join('、') || '无';
-        const sh = items.filter(it => it.shared).map(it => `${it.table}(${it.size}人${it.manual ? '，手动' : ''})`).join('、');
+        const sh = items.filter(it => it.shared).map(it => `${it.table}(${it.size}人${it.manual ? '，手动' : ''}${helpersOf(it).length ? '，辅助：' + helperNames(it) : ''})`).join('、');
+        const helping = helpedBy(id).filter(x => pred(x.item)).map(x => `${x.item.table}(主：${wname(x.ownerId)})`).join('、');
         if (S.records[id].training) return `${i + 1}.${wname(id)}(Training，不参与排序、不计人数) ${items.length}桌，桌号：${items.map(it => `${it.table}(${it.size}人)`).join('、') || '无'}`;
         const init = withInit ? (S.records[id].init || 0) : 0;
-        return `${i + 1}.${wname(id)} 共${n + init}人${init ? `（含初始${init}人）` : ''}，${items.length}桌，桌号：${tb}` + (sh ? `；共享桌(不计人数)：${sh}` : '');
+        return `${i + 1}.${wname(id)} 共${n + init}人${init ? `（含初始${init}人）` : ''}，${items.length}桌，桌号：${tb}` + (sh ? `；共享桌(不计人数)：${sh}` : '') + (helping ? `；协助(辅助)：${helping}` : '');
       }).join('；');
     }
     // 导出文本：按时间自动分成 上午班 / 晚班 两部分
@@ -1032,6 +1055,15 @@
       }
       return null;
     }
+    // 共享桌的辅助服务员：item.helpers = [waiterId...]；记录挂在主服务员名下，辅助服务员只做协助（不计人数）
+    const helpersOf = it => (it.helpers || []).filter(id => S.records[id]);
+    const helperNames = it => helpersOf(it).map(wname).join('、');
+    function helpedBy(id) {            // 我作为辅助的共享桌
+      const out = [];
+      for (const wid in S.records) if (wid !== id) S.records[wid].items.forEach(it => { if (it.shared && helpersOf(it).includes(id)) out.push({ item: it, ownerId: wid }); });
+      return out;
+    }
+    const chipLabel = it => `${esc(it.table)}${it.shared ? (it.manual ? ' 手动共享·' : ' 共享·') + it.size + '人(不计)' : '·' + it.size + '人'}`;
     const descItem = it => it.shared ? `${it.table} ${shareLabel(it)}(${it.size}人，${it.manual ? '前台手动设置，' : ''}不计人数)` : `${it.table} ${it.size}人`;
 
     /* ---------- 撤销 / 重做 ----------
@@ -1063,17 +1095,19 @@
     }
 
     // target：前台手动指派给某位服务员（用于 Training）；不传则按排序分给下一位
-    function assign(table, size, manual, target) {
+    function assign(table, size, manual, target, helpers) {
       const id = target && S.records[target] ? target : nextWaiter();
       if (!id) return;
       pushUndo(`分配 ${table} ${size}人 → ${wname(id)}${S.records[id].training ? '（Training）' : ''}`);
       const r = S.records[id], before = r.count;
       const item = { id: uid(), table, size, shared: calcShared(size, manual), t: Date.now() };
       if (manual) item.manual = true;
+      const hs = item.shared ? [...new Set(helpers || [])].filter(h => h !== id && S.records[h]) : [];
+      if (hs.length) item.helpers = hs;
       r.items.push(item);
       S.history.push({ id: item.id, waiterId: id, time: Date.now() });
       recount();
-      addLog('assign', `${descItem(item)} → ${wname(id)}（${r.training ? 'Training，前台手动指派，不参与排序、不计人数' : target && item.shared ? `前台手动指定服务员，共享桌不计人数，${before} → ${r.count} 人` : `${before} → ${r.count} 人`}）；下一位：${wname(nextWaiter())}`, true);
+      addLog('assign', `${descItem(item)} → ${wname(id)}（${r.training ? 'Training，前台手动指派，不参与排序、不计人数' : target && item.shared ? `前台手动指定服务员，共享桌不计人数，${before} → ${r.count} 人` : `${before} → ${r.count} 人`}）${hs.length ? `；辅助服务员：${hs.map(wname).join('、')}` : ''}；下一位：${wname(nextWaiter())}`, true);
       save();
     }
 
@@ -1092,7 +1126,7 @@
 
     // 客人换桌 / 临时加减人：服务员不变，重新计算人数（可能跨过共享桌阈值）
     // newWaiter：只有共享桌可以改指定服务员（普通桌按排序规则，不能随意转给别人）
-    function editEntry(id, table, size, manual, newWaiter) {
+    function editEntry(id, table, size, manual, newWaiter, helpers) {
       const f = findItem(id);
       if (!f) return;
       const before = f.r.count, old = descItem(f.item);
@@ -1106,8 +1140,15 @@
         S.history.forEach(h => { if (h.id === id) h.waiterId = newWaiter; });
         moved = `；共享桌改由 ${wname(newWaiter)} 负责（原：${wname(f.waiterId)}，前台手动指定）`;
       }
+      const mainId = S.history.find(h => h.id === id) ? S.history.find(h => h.id === id).waiterId : f.waiterId;
+      const oldHs = helperNames(f.item);
+      if (f.item.shared && helpers) { const hs = [...new Set(helpers)].filter(h => h !== mainId && S.records[h]); if (hs.length) f.item.helpers = hs; else delete f.item.helpers; }
+      else if (!f.item.shared) delete f.item.helpers;
+      else if (f.item.helpers) f.item.helpers = f.item.helpers.filter(h => h !== mainId);     // 新主服务员原来是辅助时，不再重复
+      const newHs = helperNames(f.item);
+      const hsLog = oldHs !== newHs ? `；辅助服务员：${oldHs || '无'} → ${newHs || '无'}` : '';
       recount();
-      addLog('edit', `修改：${wname(f.waiterId)} 的 ${old} → ${descItem(f.item)}${moved ? moved : `（${before} → ${f.r.count} 人）`}；下一位：${wname(nextWaiter())}`, true);
+      addLog('edit', `修改：${wname(f.waiterId)} 的 ${old} → ${descItem(f.item)}${moved ? moved : `（${before} → ${f.r.count} 人）`}${hsLog}；下一位：${wname(nextWaiter())}`, true);
       save();
     }
 
@@ -1130,7 +1171,7 @@
       for (const wid in S.records) {
         S.records[wid].items.forEach(it => { if (it.table === code && !it.released) it.released = now; });
       }
-      addLog('release', `释放占位：${code}（${wname(f.waiterId)}，${f.item.shared ? shareLabel(f.item) + ' ' : ''}${f.item.size}人，入座 ${fmtTime(f.item.t)}）`, true);
+      addLog('release', `释放占位：${code}（${wname(f.waiterId)}${helpersOf(f.item).length ? `，辅助：${helperNames(f.item)}` : ''}，${f.item.shared ? shareLabel(f.item) + ' ' : ''}${f.item.size}人，入座 ${fmtTime(f.item.t)}）`, true);
       save();
       closeRelease();
     }
@@ -1145,7 +1186,7 @@
       const it = f.item;
       return `<div class="mask" onclick="if(event.target===this)closeRelease()"><div class="modal">
     <h3>释放占位 · ${esc(code)}</h3>
-    <div class="hint">服务员：<b>${esc(wname(f.waiterId))}</b></div>
+    <div class="hint">${helpersOf(it).length ? '主服务员' : '服务员'}：<b>${esc(wname(f.waiterId))}</b>${helpersOf(it).length ? `　辅助：<b>${esc(helperNames(it))}</b>` : ''}</div>
     <div class="lbl">入座信息</div>
     <div>${it.shared ? `${shareLabel(it)} ${it.size} 人（不计人数）` : `${it.size} 人`} · 入座 ${fmtTime(it.t)}</div>
     <div class="hint" style="margin-top:10px">释放后该桌可重新分配；已记录的服务人数和桌数不会改变。</div>
@@ -1192,7 +1233,7 @@
     function openEdit(id) {
       const f = findItem(id);
       if (!f) return;
-      ui.edit = { id, table: f.item.table, origTable: f.item.table, size: f.item.size, manual: !!f.item.manual, waiterId: f.waiterId };
+      ui.edit = { id, table: f.item.table, origTable: f.item.table, size: f.item.size, manual: !!f.item.manual, waiterId: f.waiterId, helpers: helpersOf(f.item).slice() };
       render();
     }
     function closeEdit() { ui.edit = null; render(); }
@@ -1202,7 +1243,8 @@
       return f && !f.item.released && occupantOf(c, ui.edit.id);
     }
     function editPick(i) { const c = editCodes()[i]; if (editConflict(c)) return; ui.edit.table = c; render(); }
-    function editWaiter(id) { ui.edit.waiterId = id; render(); }
+    function editWaiter(id) { ui.edit.waiterId = id; ui.edit.helpers = (ui.edit.helpers || []).filter(h => h !== id); render(); }
+    function editHelper(id) { const h = ui.edit.helpers || (ui.edit.helpers = []), i = h.indexOf(id); if (i >= 0) h.splice(i, 1); else h.push(id); render(); }
     function editManual(on) { ui.edit.manual = on; render(); }
     function editStep(d) { ui.edit.size = Math.max(1, (ui.edit.size || 0) + d); render(); }
     function editTyping(v) {            // 打字时不整页重绘，避免丢焦点
@@ -1232,7 +1274,7 @@
       if (editConflict(e.table)) return alert(`${e.table} 已被占位，请先释放或选择其他桌`);
       if (t && !calcShared(e.size, e.manual) && e.size > t.cap &&
         !confirm(`${t.code} 最多坐 ${t.cap} 人，当前 ${e.size} 人，仍要保存吗？`)) return;
-      editEntry(e.id, e.table, e.size, e.manual, e.waiterId);
+      editEntry(e.id, e.table, e.size, e.manual, e.waiterId, e.helpers);
       closeEdit();
     }
     function deleteEdit() {
@@ -1265,8 +1307,10 @@
       <button onclick="editStep(1)">+</button>
     </div>
     <label class="manual"><input type="checkbox" ${e.manual ? 'checked' : ''} onchange="editManual(this.checked)"> 设为共享桌（无论人数，只记桌号，不计人数）</label>
-    ${calcShared(e.size, e.manual) ? `<div class="lbl">负责的服务员（共享桌可手动指定）</div>
-    <div class="quick targets">${S.onDuty.filter(id => S.records[id]).map(id => `<button class="${e.waiterId === id ? 'sel' : ''}" onclick="editWaiter('${id}')">${esc(wname(id))}${S.records[id].training ? ' <small>Training</small>' : ''}</button>`).join('')}</div>` : ''}
+    ${calcShared(e.size, e.manual) ? `<div class="lbl">主服务员（共享桌可手动指定）</div>
+    <div class="quick targets">${S.onDuty.filter(id => S.records[id]).map(id => `<button class="${e.waiterId === id ? 'sel' : ''}" onclick="editWaiter('${id}')">${esc(wname(id))}${S.records[id].training ? ' <small>Training</small>' : ''}</button>`).join('')}</div>
+    <div class="lbl">辅助服务员（可多选，可不选；只做协助，不计人数）</div>
+    <div class="quick targets">${S.onDuty.filter(id => S.records[id] && id !== e.waiterId).map(id => `<button class="${(e.helpers || []).includes(id) ? 'sel' : ''}" onclick="editHelper('${id}')">${esc(wname(id))}${S.records[id].training ? ' <small>Training</small>' : ''}</button>`).join('') || '<span class="hint">没有其他在岗服务员</span>'}</div>` : ''}
     <div class="hint" id="editHint" style="margin-top:8px">${editHint()}</div>
     <div class="actions">
       <button class="btn red" onclick="deleteEdit()" style="flex:0 0 auto">删除</button>
@@ -1310,16 +1354,16 @@
     function checkAlerts(silent) {
       const w = meWaiter();
       if (admin || !w) return;
-      const items = (S.records[w.id] || { items: [] }).items;
+      const items = [...(S.records[w.id] || { items: [] }).items.map(it => ({ it, helper: false })), ...helpedBy(w.id).map(x => ({ it: x.item, helper: true, main: wname(x.ownerId) }))];
       const all = loadSeen(), seen = all[me] || {}, next = {}, fresh = [];
-      items.forEach(it => {
-        const s = itemSig(it); next[it.id] = s;
-        if (!silent && !it.released && seen[it.id] !== s) fresh.push({ table: it.table, size: it.size, shared: it.shared, manual: it.manual, t: it.t, upd: seen[it.id] !== undefined });
+      items.forEach(({ it, helper, main }) => {
+        const s = itemSig(it) + (helper ? '|h' : ''); next[it.id] = s;
+        if (!silent && !it.released && seen[it.id] !== s) fresh.push({ table: it.table, size: it.size, shared: it.shared, manual: it.manual, t: it.t, upd: seen[it.id] !== undefined, helper, main });
       });
       all[me] = next; localStorage.setItem(SEEN_KEY, JSON.stringify(all));
       if (fresh.length) pushAlert(fresh, w);
     }
-    const alertLine = a => `${a.table} · ${a.shared ? (a.manual ? '手动共享桌 ' : '共享桌 ') + a.size + ' 人（不计人数）' : a.size + ' 人'}${a.upd ? '（已修改）' : ''}`;
+    const alertLine = a => `${a.helper ? '【辅助】' : ''}${a.table} · ${a.shared ? (a.manual ? '手动共享桌 ' : '共享桌 ') + a.size + ' 人（不计人数）' : a.size + ' 人'}${a.upd ? '（已修改）' : ''}`;
     function pushAlert(fresh, w) {
       ui.alert = { list: [...((ui.alert && ui.alert.list) || []), ...fresh] };
       const r = S.records[w.id], text = fresh.map(alertLine).join('；');
@@ -1350,7 +1394,7 @@
       const w = meWaiter(), r = w && S.records[w.id], list = ui.alert.list;
       return `<div class="mask"><div class="modal alert">
     <h3>🔔 ${esc(w ? w.name : '')}，你有新分配</h3>
-    ${list.map(a => `<div class="al ${a.shared ? 'share' : ''}"><b>${esc(a.table)}</b><span>${a.shared ? (a.manual ? '手动共享桌 ' : '共享桌 ') + a.size + ' 人<small>（不计人数）</small>' : a.size + ' 人'}${a.upd ? '<small>（已修改）</small>' : ''}</span><em>${fmtTime(a.t)}</em></div>`).join('')}
+    ${list.map(a => `<div class="al ${a.shared ? 'share' : ''}"><b>${esc(a.table)}</b><span>${a.shared ? (a.manual ? '手动共享桌 ' : '共享桌 ') + a.size + ' 人<small>（不计人数）</small>' : a.size + ' 人'}${a.upd ? '<small>（已修改）</small>' : ''}${a.helper ? `<small>（你是辅助，主：${esc(a.main)}）</small>` : ''}</span><em>${fmtTime(a.t)}</em></div>`).join('')}
     ${r ? `<div class="hint">${r.training ? `你是 Training（不计人数）· ${r.items.length} 桌 · 占位 ${activeOf(w.id)} 桌` : `你目前累计：${r.count} 人 · ${r.items.length} 桌 · 占位 ${activeOf(w.id)} 桌`}</div>` : ''}
     <div class="actions"><button class="btn" onclick="ackAlert()">我知道了</button></div>
   </div></div>`;
@@ -1364,7 +1408,8 @@
       return `<div class="card mine">
     <div class="label">我的最新分配 · ${esc(w.name)}</div>
     <div class="big">${last ? `${esc(last.table)} <span>${last.shared ? shareLabel(last) + ' ' + last.size + ' 人(不计)' : last.size + ' 人'}</span> <small>${fmtTime(last.t)}${last.released ? ' · 已释放' : ''}</small>` : '<span class="hint">还没有分配</span>'}</div>
-    <div class="hint">${r.training ? `Training（不计人数）· ${r.items.length} 桌` : `累计 ${r.count} 人 · ${r.items.length} 桌`} · 占位 ${activeOf(w.id)} 桌</div>${notif}
+    <div class="hint">${r.training ? `Training（不计人数）· ${r.items.length} 桌` : `累计 ${r.count} 人 · ${r.items.length} 桌`} · 占位 ${activeOf(w.id)} 桌</div>
+    ${helpedBy(w.id).filter(x => !x.item.released).length ? `<div class="hint" style="color:#364fc7">正在协助（辅助）：${helpedBy(w.id).filter(x => !x.item.released).map(x => `${esc(x.item.table)}（主：${esc(wname(x.ownerId))}）`).join('、')}</div>` : ''}${notif}
   </div>`;
     }
 
@@ -1659,6 +1704,9 @@
       const sharedNow = manualOn || shared;                                  // 共享桌：可以手动指定任意在岗服务员
       const targets = sharedNow ? S.onDuty.filter(id => S.records[id]) : trainees;
       const tgt = targets.includes(ui.target) ? ui.target : null;
+      const mainSel = tgt || nid;
+      const helperOpts = sharedNow ? S.onDuty.filter(id => S.records[id] && id !== mainSel) : [];
+      const helpersSel = (ui.helpers || []).filter(id => helperOpts.includes(id));
       const ready = ui.table && ui.size >= 1;
       return `
   ${myCard()}
@@ -1677,7 +1725,7 @@
     ${S.tables.length ? layoutGrid(S.tables, t => {
         const o = occupantOf(t.code);
         return o
-          ? `<button class="occ" onclick="openRelease('${esc(t.code)}')">${esc(t.code)} <small>占位·${esc(wname(o.waiterId))}·${o.item.size}人</small></button>`
+          ? `<button class="occ" onclick="openRelease('${esc(t.code)}')">${esc(t.code)} <small>占位·${esc(wname(o.waiterId))}${helpersOf(o.item).length ? '+' + helpersOf(o.item).length + '辅' : ''}·${o.item.size}人</small></button>`
           : `<button class="${ui.table === t.code ? 'sel' : ''}" onclick="pickTable('${esc(t.code)}')">${esc(t.code)} <small>/${t.cap}人</small></button>`;
       }) : '<div class="empty">请先到「配置」添加餐桌</div>'}
     <div class="label hint">客人人数</div>
@@ -1688,9 +1736,11 @@
     <label class="manual"><input type="checkbox" ${manualOn ? 'checked' : ''} onchange="toggleManual(this.checked)"> 设为共享桌（无论人数，只记桌号，不计人数）</label>
     <div class="hint" id="sizeHint" style="color:#1971c2">${sizeHintText()}</div>
     ${admin && targets.length ? `<div class="quick targets" style="margin-top:10px"><button class="${tgt ? '' : 'sel'}" onclick="pickTarget(null)">自动：${esc(wname(nid))}</button>${targets.map(id => `<button class="${tgt === id ? 'sel' : ''}" onclick="pickTarget('${id}')">${esc(wname(id))}${S.records[id].training ? ' <small>Training</small>' : ''}</button>`).join('')}</div>
-    <div class="hint" style="margin-top:6px">${[sharedNow ? '共享桌可手动指定服务员' : '', trainees.length ? 'Training 手动指派，不参与排序' : ''].filter(Boolean).join('；')}</div>` : ''}
+    <div class="hint" style="margin-top:6px">${[sharedNow ? '共享桌可手动指定主服务员' : '', trainees.length ? 'Training 手动指派，不参与排序' : ''].filter(Boolean).join('；')}</div>` : ''}
+    ${admin && helperOpts.length ? `<div class="label hint" style="margin-top:8px">辅助服务员（可多选，可不选；只做协助，不计人数）</div>
+    <div class="quick targets">${helperOpts.map(id => `<button class="${helpersSel.includes(id) ? 'sel' : ''}" onclick="pickHelper('${id}')">${esc(wname(id))}${S.records[id].training ? ' <small>Training</small>' : ''}</button>`).join('')}</div>` : ''}
     <div style="margin-top:12px"><button class="btn" id="assignBtn" style="width:100%" ${ready ? '' : 'disabled'} onclick="doAssign()">
-      分配给 ${esc(wname(tgt || nid))}${tgt && S.records[tgt].training ? '（Training，不计人数）' : ''}</button></div>
+      分配给 ${esc(wname(tgt || nid))}${tgt && S.records[tgt].training ? '（Training，不计人数）' : ''}${helpersSel.length ? ' + 辅助 ' + helpersSel.map(wname).join('、') : ''}</button></div>
   </div>
 
   <div class="card board">
@@ -1700,7 +1750,9 @@
           return `<div class="w ${id === nid ? 'is-next' : ''}">
         <span class="badge">${i + 1}</span>
         <div class="info"><b>${esc(wname(id))}</b> ${r.training ? '<span class="tag-train">Training</span>' : id === nid ? '<span class="chip">下一位</span>' : ''}
-          <div>${r.items.map(it => `<button class="chip editable ${it.shared ? 'share' : ''} ${it.released ? 'released' : ''}" title="${it.released ? '已释放' : '占位中'}" onclick="openEdit('${it.id}')">${esc(it.table)}${it.shared ? (it.manual ? ' 手动共享·' : ' 共享·') + it.size + '人(不计)' : '·' + it.size + '人'}</button>`).join('') || '<span class="hint">暂无</span>'}</div>
+          <div>${r.items.map(it => `<button class="chip editable ${it.shared ? 'share' : ''} ${it.released ? 'released' : ''}" title="${it.released ? '已释放' : '占位中'}" onclick="openEdit('${it.id}')">${helpersOf(it).length ? '<b class="rk">主</b>' : ''}${chipLabel(it)}${helpersOf(it).length ? ` <small>辅：${esc(helperNames(it))}</small>` : ''}</button>`).join('')
+            + helpedBy(id).map(({ item: it, ownerId }) => `<button class="chip editable helper ${it.released ? 'released' : ''}" title="${it.released ? '已释放' : '占位中'}" onclick="openEdit('${it.id}')"><b class="rk">辅</b>${chipLabel(it)} <small>主：${esc(wname(ownerId))}</small></button>`).join('')
+            || '<span class="hint">暂无</span>'}</div>
         </div>
         <div class="cnt">${r.training ? '<small style="color:#5f3dc4">不计人数</small>' : `${r.count}<small> 人</small>`} <span style="color:#555">${r.items.length}</span><small> 桌</small><div class="hint" style="font-size:12px;font-weight:600;color:${activeOf(id) ? '#c92a2a' : '#868e96'}">占位 ${activeOf(id)} 桌</div>${r.init ? `<div class="hint" style="font-size:12px;font-weight:400;color:#868e96">含初始 ${r.init} 人</div>` : ''}${sharedOf(id).length ? `<div class="hint" style="font-size:12px;font-weight:400;color:#1971c2">含共享 ${sharedOf(id).length} 桌</div>` : ''}</div>
       </div>`;
@@ -1712,7 +1764,7 @@
     ${S.history.slice(-8).reverse().map(h => {
           const f = findItem(h.id); if (!f) return '';
           return `<div class="recent"><span>${fmtTime(h.time)}
-      ${esc(f.item.table)} → <b>${esc(wname(h.waiterId))}</b> ${f.item.shared ? `${shareLabel(f.item)} ${f.item.size}人(不计)` : f.item.size + '人'}</span>
+      ${esc(f.item.table)} → <b>${esc(wname(h.waiterId))}</b>${helpersOf(f.item).length ? ` <small>(主；辅：${esc(helperNames(f.item))})</small>` : ''} ${f.item.shared ? `${shareLabel(f.item)} ${f.item.size}人(不计)` : f.item.size + '人'}</span>
       <button class="mini" style="color:#444" onclick="openEdit('${h.id}')">修改</button></div>`;
         }).join('')
         || '<div class="empty">暂无</div>'}
@@ -1869,7 +1921,8 @@ ${SHIFT_NAME.evening}（${shiftRange('evening')}）：${summary(inShift('evening
       return ui.manual ? '已手动设为共享桌：只记录桌号，不计人数'
         : ui.size > SHARE_THRESHOLD ? `人数 &gt; ${SHARE_THRESHOLD}：共享桌，只记录桌号，不计人数` : '';
     }
-    function pickTarget(id) { ui.target = id; render(); }
+    function pickTarget(id) { ui.target = id; ui.helpers = (ui.helpers || []).filter(h => h !== id); render(); }
+    function pickHelper(id) { const h = ui.helpers || (ui.helpers = []), i = h.indexOf(id); if (i >= 0) h.splice(i, 1); else h.push(id); render(); }
     function toggleManual(on) { ui.manual = on; render(); }
     function pickSize(n) { ui.size = n; ui.custom = ''; render(); }
     // 「其他」输入框：只改局部元素，不整页重绘，所以不会丢焦点或清空输入
@@ -1888,8 +1941,8 @@ ${SHIFT_NAME.evening}（${shiftRange('evening')}）：${summary(inShift('evening
       const t = S.tables.find(t => t.code === ui.table);
       if (t && !ui.manual && ui.size > t.cap && ui.size <= SHARE_THRESHOLD &&
         !confirm(`${t.code} 最多坐 ${t.cap} 人，当前 ${ui.size} 人，仍要分配吗？`)) return;
-      assign(ui.table, ui.size, ui.manual, admin ? ui.target : null);
-      ui.table = null; ui.size = null; ui.custom = ''; ui.manual = false; ui.target = null; render();
+      assign(ui.table, ui.size, ui.manual, admin ? ui.target : null, admin ? ui.helpers : null);
+      ui.table = null; ui.size = null; ui.custom = ''; ui.manual = false; ui.target = null; ui.helpers = []; render();
     }
     function doUndo() { undo(); render(); }
     function doRedo() { redo(); render(); }
