@@ -203,41 +203,24 @@
       margin-top: 8px;
     }
 
-    .trainbox {
-      margin-top: 12px;
-      padding: 10px 12px;
-      border: 1px solid #d0bfff;
-      border-radius: 10px;
-      background: #f8f5ff;
-    }
-
-    .trainhead {
-      font-size: 13px;
-      color: #5f3dc4;
-      font-weight: 600;
-    }
-
-    .trainhead small {
-      margin-left: 8px;
-      font-size: 12px;
-      font-weight: 400;
-      color: var(--mute);
-    }
-
-    .trainbox .quick {
-      margin-top: 8px;
-    }
-
-    .trainbox .quick button {
+    .quick button.tr {
       border-color: #d0bfff;
+      background: #f8f5ff;
+      color: #5f3dc4;
     }
 
-    .trainbox .quick button.sel {
+    .quick button.tr.sel {
       background: #5f3dc4;
       border-color: #5f3dc4;
       color: #fff;
     }
 
+    .trhint {
+      margin-top: 6px;
+      font-size: 12px;
+      color: #5f3dc4;
+      font-weight: 600;
+    }
 
     .chip.helper {
       background: #edf2ff;
@@ -1768,8 +1751,8 @@
       const trainees = S.onDuty.filter(id => S.records[id] && S.records[id].training);
       const sharedNow = manualOn || shared;                                  // 共享桌：可以手动指定任意在岗服务员
       const autoId = sharedNow ? nextSharedWaiter() : nid;                   // 自动分配的服务员（共享桌按顺位轮转）
-      const normalTargets = sharedNow ? S.onDuty.filter(id => S.records[id] && !S.records[id].training && id !== autoId) : [];   // 共享桌的“手动选择”：正常服务员，剔除自动分配的那位
-      const targets = [...normalTargets, ...trainees];                       // Training 单独放在自己的区块里选
+      const normalTargets = sharedNow ? S.onDuty.filter(id => S.records[id] && !S.records[id].training && id !== autoId) : [];   // 共享桌可手动选择的正常服务员（剔除自动分配的那位）
+      const targets = [...normalTargets, ...trainees];                       // Training 和正常服务员放在同一行，按钮颜色区分
       const tgt = targets.includes(ui.target) ? ui.target : null;
       const mainSel = tgt || autoId;
       const helperOpts = sharedNow ? S.onDuty.filter(id => S.records[id] && id !== mainSel) : [];
@@ -1803,18 +1786,15 @@
     <div class="sharebox">
     <label class="manual"><input type="checkbox" ${manualOn || shared ? 'checked' : ''} ${shared ? 'disabled' : ''} onchange="toggleManual(this.checked)"> 设为共享桌（只记桌号，不计人数）${shared ? `<small style="color:var(--mute)">人数 ≥ ${SHARE_THRESHOLD + 1}，自动选中</small>` : ''}</label>
     <div class="hint" id="sizeHint" style="color:#1971c2">${sizeHintText()}</div>
-    ${admin && sharedNow ? `<div class="hint" style="margin-top:8px">共享桌不计人数，自动按顺位轮转：这桌自动分配给 <b>${esc(wname(autoId))}</b></div>
-    <div class="label hint" style="margin-top:8px">主服务员</div>
-    <div class="quick targets"><button class="${tgt ? '' : 'sel'}" onclick="pickTarget(null)">${esc(wname(autoId))} <small>（默认）</small></button>${normalTargets.map(id => `<button class="${tgt === id ? 'sel' : ''}" onclick="pickTarget('${id}')">${esc(wname(id))}</button>`).join('')}</div>` : ''}
+    ${admin && sharedNow ? `<div class="hint" style="margin-top:8px">共享桌不计人数，自动按顺位轮转：这桌自动分配给 <b>${esc(wname(autoId))}</b></div>` : ''}
+    ${admin && (sharedNow || trainees.length) ? `<div class="label hint" style="margin-top:8px">${sharedNow ? '主服务员' : '指派给'}</div>
+    <div class="quick targets"><button class="${tgt ? '' : 'sel'}" onclick="pickTarget(null)">${esc(wname(autoId))} <small>（默认）</small></button>${normalTargets.map(id => `<button class="${tgt === id ? 'sel' : ''}" onclick="pickTarget('${id}')">${esc(wname(id))}</button>`).join('')}${trainees.map(id => `<button class="tr ${tgt === id ? 'sel' : ''}" onclick="pickTarget(${tgt === id ? 'null' : `'${id}'`})">${esc(wname(id))} <small>Training</small></button>`).join('')}</div>
+    ${tgt && S.records[tgt] && S.records[tgt].training ? `<div class="trhint">Training 手动指派，不参与排序</div>` : ''}` : ''}
     ${admin && helperOpts.length ? `<div class="label hint" style="margin-top:8px">辅助服务员（可多选，可不选；只做协助，不计人数）</div>
     <div class="quick targets">${helperOpts.map(id => `<button class="${helpersSel.includes(id) ? 'sel' : ''}" onclick="pickHelper('${id}')">${esc(wname(id))}${S.records[id].training ? ' <small>Training</small>' : ''}</button>`).join('')}</div>` : ''}
     </div>
     <div style="margin-top:12px"><button class="btn" id="assignBtn" style="width:100%" ${ready ? '' : 'disabled'} onclick="doAssign()">
       分配给 ${esc(wname(mainSel))}${tgt && S.records[tgt].training ? '（Training，不计人数）' : ''}${helpersSel.length ? ' + 辅助 ' + helpersSel.map(wname).join('、') : ''}</button></div>
-    ${admin && trainees.length ? `<div class="trainbox">
-      <div class="trainhead">Training 手动指派，不参与排序<small>点名字选中，再点一次取消；选中后分配给 TA，不计人数</small></div>
-      <div class="quick targets">${trainees.map(id => `<button class="${tgt === id ? 'sel' : ''}" onclick="pickTarget(${tgt === id ? 'null' : `'${id}'`})">${esc(wname(id))}</button>`).join('')}</div>
-    </div>` : ''}
   </div>
 
   <div class="card board">
