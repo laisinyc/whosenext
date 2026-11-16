@@ -1332,8 +1332,7 @@
     function editHint() {
       const e = ui.edit, t = S.tables.find(t => t.code === e.table);
       if (!e.size) return '请输入人数';
-      if (e.manual) return `<span style="color:#1971c2">已手动设为共享桌：只记桌号，不计人数</span>`;
-      if (isShared(e.size)) return '';                       // 达到共享桌人数：勾选框已自动选中，不再额外提示，也不检查桌子容量
+      if (e.manual || isShared(e.size)) return '';                       // 达到共享桌人数：勾选框已自动选中，不再额外提示，也不检查桌子容量
       if (t && e.size > t.cap) return `<span style="color:#e03131">${esc(t.code)} 最多坐 ${t.cap} 人</span>`;
       return `计入服务人数：${e.size} 人`;
     }
@@ -1998,7 +1997,7 @@ ${SHIFT_NAME.evening}（${shiftRange('evening')}）：${summary(inShift('evening
       render();
     }
     function sizeHintText() {
-      return ui.manual ? '已手动设为共享桌：只记录桌号，不计人数' : '';
+      return '';
     }
     function pickTarget(id) { ui.target = id; ui.helpers = (ui.helpers || []).filter(h => h !== id); render(); }
     function pickHelper(id) { const h = ui.helpers || (ui.helpers = []), i = h.indexOf(id); if (i >= 0) h.splice(i, 1); else h.push(id); render(); }
