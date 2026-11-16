@@ -1737,10 +1737,11 @@
     // 只有 config.js 的 trainingWaiters 里列出的服务员才有 Training 选项；没配置则整个功能不显示
     const TRAINING_NAMES = (Array.isArray(CFG.trainingWaiters) ? CFG.trainingWaiters : []).map(n => String(n).trim()).filter(Boolean);
     const canTrain = id => TRAINING_NAMES.includes(wname(id));
-    const isTrainee = id => canTrain(id) && !!(S.trainees && S.trainees[id]);
+    // 默认选中：除非前台手动取消勾选（记为 false）
+    const isTrainee = id => canTrain(id) && !(S.trainees && S.trainees[id] === false);
     const canStart = () => S.onDuty.some(id => !isTrainee(id));        // 至少要有一位正常参与排序的服务员
     function setTrainee(id, on) { if (needAdmin() || S.started || ui.shuffling || !canTrain(id)) return;
-      S.trainees = S.trainees || {}; if (on) S.trainees[id] = true; else delete S.trainees[id];
+      S.trainees = S.trainees || {}; S.trainees[id] = !!on;
       save(); render();
     }
     function initStep(id, d) { if (needAdmin() || S.started || ui.shuffling) return; setInit(id, initOf(id) + d); render(); }
