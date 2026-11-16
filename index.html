@@ -1344,7 +1344,7 @@
       <input type="number" min="1" value="${e.size || ''}" oninput="editTyping(this.value)">
       <button onclick="editStep(1)">+</button>
     </div>
-    <label class="manual"><input type="checkbox" ${e.manual ? 'checked' : ''} onchange="editManual(this.checked)"> 设为共享桌（无论人数，只记桌号，不计人数）</label>
+    <label class="manual"><input type="checkbox" ${e.manual || isShared(e.size) ? 'checked' : ''} ${isShared(e.size) ? 'disabled' : ''} onchange="editManual(this.checked)"> 设为共享桌（无论人数，只记桌号，不计人数）${isShared(e.size) ? `<small style="color:var(--mute)">人数 ≥ ${SHARE_THRESHOLD + 1}，自动选中</small>` : ''}</label>
     ${calcShared(e.size, e.manual) ? `<div class="lbl">主服务员（共享桌可手动指定）</div>
     <div class="quick targets">${S.onDuty.filter(id => S.records[id]).map(id => `<button class="${e.waiterId === id ? 'sel' : ''}" onclick="editWaiter('${id}')">${esc(wname(id))}${S.records[id].training ? ' <small>Training</small>' : ''}</button>`).join('')}</div>
     <div class="lbl">辅助服务员（可多选，可不选；只做协助，不计人数）</div>
@@ -1772,7 +1772,7 @@
         `<button data-n="${n}" class="${ui.size === n && !ui.custom ? 'sel' : ''}" onclick="pickSize(${n})">${n}</button>`).join('')}
       <input class="num" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" placeholder="其他" value="${esc(ui.custom || '')}" oninput="typeSize(this)">
     </div>
-    <label class="manual"><input type="checkbox" ${manualOn ? 'checked' : ''} onchange="toggleManual(this.checked)"> 设为共享桌（无论人数，只记桌号，不计人数）</label>
+    <label class="manual"><input type="checkbox" ${manualOn || shared ? 'checked' : ''} ${shared ? 'disabled' : ''} onchange="toggleManual(this.checked)"> 设为共享桌（无论人数，只记桌号，不计人数）${shared ? `<small style="color:var(--mute)">人数 ≥ ${SHARE_THRESHOLD + 1}，自动选中</small>` : ''}</label>
     <div class="hint" id="sizeHint" style="color:#1971c2">${sizeHintText()}</div>
     ${admin && !sharedNow && targets.length ? `<div class="quick targets" style="margin-top:10px"><button class="${tgt ? '' : 'sel'}" onclick="pickTarget(null)">自动：${esc(wname(nid))}</button>${targets.map(id => `<button class="${tgt === id ? 'sel' : ''}" onclick="pickTarget('${id}')">${esc(wname(id))}${S.records[id].training ? ' <small>Training</small>' : ''}</button>`).join('')}</div>
     <div class="hint" style="margin-top:6px">Training 手动指派，不参与排序</div>` : ''}
@@ -1973,8 +1973,14 @@ ${SHIFT_NAME.evening}（${shiftRange('evening')}）：${summary(inShift('evening
       const digits = inp.value.replace(/\D/g, '');
       if (digits !== inp.value) inp.value = digits;
       const n = parseInt(digits, 10);
+      const wasShared = ui.manual || ui.size > SHARE_THRESHOLD;
       ui.custom = digits;
       ui.size = n >= 1 ? n : null;
+      if (wasShared !== (ui.manual || ui.size > SHARE_THRESHOLD)) {          // 跨过共享桌阈值：共享桌勾选框、指派选项要跟着变，重绘后把焦点放回输入框
+        render();
+        const el = document.querySelector('.quick input.num'); if (el) { el.focus(); const l = el.value.length; try { el.setSelectionRange(l, l); } catch (e) { } }
+        return;
+      }
       document.querySelectorAll('.quick button').forEach(b => b.classList.remove('sel'));
       document.getElementById('sizeHint').innerHTML = sizeHintText();
       document.getElementById('assignBtn').disabled = !(ui.table && ui.size >= 1);
