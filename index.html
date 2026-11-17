@@ -396,6 +396,56 @@
       opacity: .7;
     }
 
+    .tables button.rdy {
+      background: #ebfbee;
+      border-color: #8ce99a;
+    }
+
+    .tables button.rdy small {
+      color: #2b8a3e;
+      opacity: 1;
+      font-weight: 600;
+    }
+
+    .tables button.rdy.sel {
+      background: var(--pri);
+      border-color: var(--pri);
+    }
+
+    .tables button.rdy.sel small {
+      color: #fff;
+    }
+
+    .setbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+      margin: 8px 0;
+      font-size: 13px;
+      color: #2b8a3e;
+    }
+
+    .setbar b {
+      margin-right: 4px;
+    }
+
+    .setbar button {
+      min-width: 36px;
+      padding: 6px 10px;
+      border: 1px solid #8ce99a;
+      background: #fff;
+      color: #2b8a3e;
+      border-radius: 8px;
+      font-size: 14px;
+    }
+
+    .setbar button.on {
+      background: #40c057;
+      border-color: #40c057;
+      color: #fff;
+    }
+
     .quick {
       display: flex;
       flex-wrap: wrap;
@@ -1153,6 +1203,7 @@
       const hs = item.shared ? [...new Set(helpers || [])].filter(h => h !== id && S.records[h]) : [];
       if (hs.length) item.helpers = hs;
       r.items.push(item);
+      if (S.ready) delete S.ready[table];                      // 客人入座，餐具标记作废
       S.history.push({ id: item.id, waiterId: id, time: Date.now() });
       recount();
       addLog('assign', `${descItem(item)} → ${wname(id)}（${r.training ? 'Training，前台手动指派，不参与排序、不计人数' : target && item.shared ? `前台手动指定服务员，共享桌不计人数，${before} → ${r.count} 人` : item.auto ? `共享桌顺位轮转，不计人数，${before} → ${r.count} 人` : `${before} → ${r.count} 人`}）${hs.length ? `；辅助服务员：${hs.map(wname).join('、')}` : ''}；下一位：${wname(nextWaiter())}`, true);
@@ -1779,8 +1830,9 @@
         const o = occupantOf(t.code);
         return o
           ? `<button class="occ" onclick="openRelease('${esc(t.code)}')">${esc(t.code)} <small>占位·${esc(wname(o.waiterId))}${helpersOf(o.item).length ? '+' + helpersOf(o.item).length + '辅' : ''}·${o.item.size}人</small></button>`
-          : `<button class="${ui.table === t.code ? 'sel' : ''}" onclick="pickTable('${esc(t.code)}')">${esc(t.code)} <small>/${t.cap}人</small></button>`;
+          : `<button class="${ui.table === t.code ? 'sel' : ''} ${readyOf(t.code) ? 'rdy' : ''}" onclick="pickTable('${esc(t.code)}')">${esc(t.code)} <small>/${t.cap}人${readyOf(t.code) ? ' · 备' + readyOf(t.code) : ''}</small></button>`;
       }) : '<div class="empty">请先到「配置」添加餐桌</div>'}
+    ${readyBar()}
     <div class="label hint">客人人数</div>
     <div class="quick">${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(n =>
         `<button data-n="${n}" class="${ui.size === n && !ui.custom ? 'sel' : ''}" onclick="pickSize(${n})">${n}</button>`).join('')}
@@ -1946,7 +1998,7 @@ ${SHIFT_NAME.evening}（${shiftRange('evening')}）：${summary(inShift('evening
       S.logArchive = S.logArchive.slice(-60); // 最多保留 60 天
       // 如果这次结束的是一个空的营业（比如误点了开始又结束），不要盖掉之前还能恢复的那份
       if (hadActivity || !restorable()) S.lastEnded = { at, ...snapshot };
-      S.started = false; S.records = {}; S.history = []; S.onDuty = []; S.initCounts = {}; S.trainees = {}; S.log = []; S.undoStack = []; S.redoStack = [];
+      S.started = false; S.records = {}; S.history = []; S.onDuty = []; S.initCounts = {}; S.trainees = {}; S.ready = {}; S.log = []; S.undoStack = []; S.redoStack = [];
       save(); render();
     }
     function restoreDay() {
@@ -1977,8 +2029,28 @@ ${SHIFT_NAME.evening}（${shiftRange('evening')}）：${summary(inShift('evening
       ui.table = ui.table === c ? null : c;      // 再点一次已选中的桌：取消选择
       render();
     }
+    /* ---------- 餐具已摆好（ready for n） ----------
+       S.ready = { 桌号: 已摆的餐具副数 }；餐桌按钮变淡绿并显示“备n”。
+       点桌后在“已摆餐具”一行选副数，再点一次相同的数字取消；这桌分配给客人后自动清除。前台和服务员都可以标记。 */
+    const readyOf = code => (S.ready || {})[code] || 0;
+    function readyBar() {
+      const t = ui.table && S.tables.find(x => x.code === ui.table);
+      if (!t || occupantOf(t.code)) return '';
+      const cur = readyOf(t.code);
+      return `<div class="setbar"><b>${esc(t.code)} 已摆餐具</b>${Array.from({ length: t.cap }, (_, i) => i + 1).map(n =>
+        `<button class="${cur === n ? 'on' : ''}" onclick="setReady('${esc(t.code)}', ${cur === n ? 0 : n})">${n}</button>`).join('')}${cur ? `<button onclick="setReady('${esc(t.code)}', 0)">清除</button>` : ''}</div>`;
+    }
+    function setReady(code, n) {
+      const before = readyOf(code);
+      if (before === n) return;
+      S.ready = S.ready || {};
+      if (n > 0) S.ready[code] = n; else delete S.ready[code];
+      addLog('ready', n > 0 ? `${code} 已摆好 ${n} 副餐具（ready for ${n}）` : `${code} 取消餐具标记（原 ${before} 副）`);
+      save(); render();
+    }
     function sizeHintText() {
-      return '';
+      const n = readyOf(ui.table);
+      return n && ui.size > n ? `${ui.table} 已摆 ${n} 副餐具，还差 ${ui.size - n} 副` : '';
     }
     function pickTarget(id) { ui.target = id; ui.helpers = (ui.helpers || []).filter(h => h !== id); render(); }
     function pickHelper(id) { const h = ui.helpers || (ui.helpers = []), i = h.indexOf(id); if (i >= 0) h.splice(i, 1); else h.push(id); render(); }
