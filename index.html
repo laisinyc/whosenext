@@ -1082,7 +1082,8 @@
     /* 每条日志记录操作人（前台 / 服务员名字）和操作设备的 IP 及大致位置。
        IP 和位置由浏览器向 ipwho.is 查询（按 IP 估算到城市级别，不是精确地址；查不到时只记操作人）；
        config.js 里设 logClientIp: false 可关闭。 */
-    const LOG_IP = CFG.logClientIp !== false;
+    const LOG_ON = CFG.enableLog !== false;                  // config.js 里 enableLog: false 关闭整个日志功能（不记录、不同步、不显示页签）
+    const LOG_IP = LOG_ON && CFG.logClientIp !== false;
     let NET = null, netTried = 0;
     function lookupNet() {
       if (!LOG_IP || Date.now() - netTried < 30000) return;     // 查询失败时 30 秒内不重试
@@ -1096,6 +1097,7 @@
     const whoAmI = () => admin ? '前台' : ((meWaiter() || {}).name || '服务员');
     const whoText = e => e.who ? `${e.who}${e.ip ? ` · IP ${e.ip}${e.loc ? '（' + e.loc + '）' : ''}` : ''}` : '';
     function addLog(type, text, withStandings) {
+      if (!LOG_ON) return;
       if (LOG_IP && (!NET || Date.now() - NET.at > 30 * 60 * 1000)) lookupNet();     // IP 可能变化（换网络），每 30 分钟刷新
       const e = { t: Date.now(), type, text, st: withStandings ? standings() : '', who: whoAmI() };
       if (LOG_IP && NET) { e.ip = NET.ip; e.loc = NET.loc; }
@@ -1552,7 +1554,7 @@
       try {
         const { ref, set } = fb.D;
         if (st !== lastStateJson) { await set(ref(fb.db, SYNC_PATH + '/state'), { v: st, t: Date.now(), by: CLIENT_ID }); lastStateJson = st; }
-        if (admin && ar !== lastArchiveJson) { await set(ref(fb.db, SYNC_PATH + '/archive'), { v: ar, t: Date.now(), by: CLIENT_ID }); lastArchiveJson = ar; }
+        if (admin && LOG_ON && ar !== lastArchiveJson) { await set(ref(fb.db, SYNC_PATH + '/archive'), { v: ar, t: Date.now(), by: CLIENT_ID }); lastArchiveJson = ar; }
         if (JSON.stringify(sharedState()) === st) localStorage.removeItem(DIRTY_KEY);   // 期间没有新改动才算同步完
         if (syncStatus === 'error' || syncStatus === 'denied') { syncStatus = 'online'; renderHeader(); }
       } catch (e) {
@@ -1615,7 +1617,7 @@
         admin = !!user; authReady = true;
         if (admin && !me) { me = '-'; localStorage.setItem(ME_KEY, me); }   // 前台设备不需要选服务员
         if (admin) {
-          if (!unsubArchive) unsubArchive = onValue(ref(fb.db, SYNC_PATH + '/archive'), snap => onRemoteArchive(snap.val()), () => { });
+          if (LOG_ON && !unsubArchive) unsubArchive = onValue(ref(fb.db, SYNC_PATH + '/archive'), snap => onRemoteArchive(snap.val()), () => { });
           if (isDirty() || remoteEmpty) schedulePush();
         } else if (unsubArchive) { unsubArchive(); unsubArchive = null; }
         render();
@@ -1710,11 +1712,11 @@
           + `<button onclick="openLogin()">前台登录</button>`);
     }
     function render() {
-      const allowed = admin ? ['assign', 'duty', 'log', 'config'] : ['assign'];   // 只读：只有分配页
+      const allowed = admin ? (LOG_ON ? ['assign', 'duty', 'log', 'config'] : ['assign', 'duty', 'config']) : ['assign'];   // 只读：只有分配页
       if (!ui.tab || !allowed.includes(ui.tab)) ui.tab = (S.started || !admin) ? 'assign' : (S.waiters.length ? 'duty' : 'config');
       document.querySelectorAll('#nav button').forEach(b => {
         b.classList.toggle('active', b.dataset.tab === ui.tab);
-        if (b.dataset.admin) b.hidden = !admin;
+        if (b.dataset.admin) b.hidden = !admin || (b.dataset.tab === 'log' && !LOG_ON);
       });
       document.getElementById('nav').hidden = !admin;   // 只读只有一页，不显示页签栏
       renderHeader();
@@ -2007,8 +2009,10 @@
 ${SHIFT_NAME.morning}（${shiftRange('morning')}）：${summary(inShift('morning'))}
 ${SHIFT_NAME.evening}（${shiftRange('evening')}）：${summary(inShift('evening'))}`);
       const at = Date.now();
-      S.logArchive.push({ date: fmtDate(S.log[0].t), entries: S.log, endedAt: at });
-      S.logArchive = S.logArchive.slice(-60); // 最多保留 60 天
+      if (LOG_ON && S.log.length) {
+        S.logArchive.push({ date: fmtDate(S.log[0].t), entries: S.log, endedAt: at });
+        S.logArchive = S.logArchive.slice(-60); // 最多保留 60 天
+      }
       // 如果这次结束的是一个空的营业（比如误点了开始又结束），不要盖掉之前还能恢复的那份
       if (hadActivity || !restorable()) S.lastEnded = { at, ...snapshot };
       S.started = false; S.records = {}; S.history = []; S.onDuty = []; S.initCounts = {}; S.trainees = {}; S.ready = {}; S.log = []; S.undoStack = []; S.redoStack = [];

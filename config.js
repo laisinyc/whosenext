@@ -85,6 +85,10 @@ window.WHOSENEXT_CONFIG = {
   // 共享桌阈值：客人人数 大于 该值 时为共享桌（只记桌号，不计人数）
   shareThreshold: 7,
 
+  // 日志功能总开关：false = 完全关闭（不记录日志、不显示“日志”页签、不同步往日日志，也不再查 IP）；以后要用改成 true 即可。
+  // 关闭期间已经存在云端的往日日志不会被删除，重新打开后还能看到。
+  enableLog: false,
+
   // 日志里记录操作人的 IP 和大致位置（城市级别，通过 ipwho.is 查询）。不需要就改成 false
   logClientIp: true,
 
