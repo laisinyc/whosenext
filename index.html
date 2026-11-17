@@ -2042,15 +2042,15 @@ ${SHIFT_NAME.evening}（${shiftRange('evening')}）：${summary(inShift('evening
       ui.table = ui.table === c ? null : c;      // 再点一次已选中的桌：取消选择
       render();
     }
-    /* ---------- 餐具已摆好（ready for n） ----------
-       S.ready = { 桌号: 已摆的餐具副数 }；餐桌按钮变淡绿并显示“备n”。
-       点桌后在“已摆餐具”一行选副数，再点一次相同的数字取消；这桌分配给客人后自动清除。前台和服务员都可以标记。 */
+    /* ---------- 预备餐具（ready for n） ----------
+       S.ready = { 桌号: 预备的餐具副数 }；餐桌按钮变淡绿并显示“备n”。
+       点桌后在“预备餐具”一行选副数，再点一次相同的数字取消；这桌分配给客人后自动清除。前台和服务员都可以标记。 */
     const readyOf = code => (S.ready || {})[code] || 0;
     function readyBar() {
       const t = ui.table && S.tables.find(x => x.code === ui.table);
       if (!t || occupantOf(t.code)) return '';
       const cur = readyOf(t.code);
-      return `<div class="setbar"><b>${esc(t.code)} 已摆餐具</b>${Array.from({ length: t.cap }, (_, i) => i + 1).map(n =>
+      return `<div class="setbar"><b>${esc(t.code)} 预备餐具</b>${Array.from({ length: t.cap }, (_, i) => i + 1).map(n =>
         `<button class="${cur === n ? 'on' : ''}" onclick="setReady('${esc(t.code)}', ${cur === n ? 0 : n})">${n}</button>`).join('')}<input class="num ${cur > t.cap ? 'on' : ''}" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="2" placeholder="其他" value="${cur > t.cap ? cur : ''}" oninput="this.value = this.value.replace(/\\D/g, '')" onchange="commitReady('${esc(t.code)}', this.value)" onkeydown="if (event.key === 'Enter') this.blur()">${cur ? `<button onclick="setReady('${esc(t.code)}', 0)">清除</button>` : ''}</div>`;
     }
     function commitReady(code, v) {           // 「其他」输入框：超过桌子容量时手动输入副数（回车或离开输入框时生效）
@@ -2063,12 +2063,12 @@ ${SHIFT_NAME.evening}（${shiftRange('evening')}）：${summary(inShift('evening
       if (before === n) return;
       S.ready = S.ready || {};
       if (n > 0) S.ready[code] = n; else delete S.ready[code];
-      addLog('ready', n > 0 ? `${code} 已摆好 ${n} 副餐具（ready for ${n}）` : `${code} 取消餐具标记（原 ${before} 副）`);
+      addLog('ready', n > 0 ? `${code} 预备 ${n} 副餐具（ready for ${n}）` : `${code} 取消餐具标记（原 ${before} 副）`);
       save(); render();
     }
     function sizeHintText() {
       const n = readyOf(ui.table);
-      return n && ui.size > n ? `${ui.table} 已摆 ${n} 副餐具，还差 ${ui.size - n} 副` : '';
+      return n && ui.size > n ? `${ui.table} 预备了 ${n} 副餐具，还差 ${ui.size - n} 副` : '';
     }
     function pickTarget(id) { ui.target = id; ui.helpers = (ui.helpers || []).filter(h => h !== id); render(); }
     function pickHelper(id) { const h = ui.helpers || (ui.helpers = []), i = h.indexOf(id); if (i >= 0) h.splice(i, 1); else h.push(id); render(); }
