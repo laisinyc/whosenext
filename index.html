@@ -440,6 +440,19 @@
       font-size: 14px;
     }
 
+    .setbar input.num {
+      flex: none;
+      width: 64px;
+      padding: 6px 8px;
+      font-size: 14px;
+    }
+
+    .setbar input.num.on {
+      border-color: #40c057;
+      background: #40c057;
+      color: #fff;
+    }
+
     .setbar button.on {
       background: #40c057;
       border-color: #40c057;
@@ -2038,7 +2051,12 @@ ${SHIFT_NAME.evening}（${shiftRange('evening')}）：${summary(inShift('evening
       if (!t || occupantOf(t.code)) return '';
       const cur = readyOf(t.code);
       return `<div class="setbar"><b>${esc(t.code)} 已摆餐具</b>${Array.from({ length: t.cap }, (_, i) => i + 1).map(n =>
-        `<button class="${cur === n ? 'on' : ''}" onclick="setReady('${esc(t.code)}', ${cur === n ? 0 : n})">${n}</button>`).join('')}${cur ? `<button onclick="setReady('${esc(t.code)}', 0)">清除</button>` : ''}</div>`;
+        `<button class="${cur === n ? 'on' : ''}" onclick="setReady('${esc(t.code)}', ${cur === n ? 0 : n})">${n}</button>`).join('')}<input class="num ${cur > t.cap ? 'on' : ''}" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="2" placeholder="其他" value="${cur > t.cap ? cur : ''}" oninput="this.value = this.value.replace(/\\D/g, '')" onchange="commitReady('${esc(t.code)}', this.value)" onkeydown="if (event.key === 'Enter') this.blur()">${cur ? `<button onclick="setReady('${esc(t.code)}', 0)">清除</button>` : ''}</div>`;
+    }
+    function commitReady(code, v) {           // 「其他」输入框：超过桌子容量时手动输入副数（回车或离开输入框时生效）
+      const n = parseInt(v, 10), t = S.tables.find(x => x.code === code);
+      if (n >= 1) setReady(code, n);
+      else if (t && readyOf(code) > t.cap) setReady(code, 0);     // 清空输入框 = 取消这个手动数量
     }
     function setReady(code, n) {
       const before = readyOf(code);
